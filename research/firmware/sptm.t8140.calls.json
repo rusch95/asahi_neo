@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "source": "/Users/rusch/Projects/asahi_neo/research/firmware/sptm.t8140.bin",
+  "genter_encoding": "0x00201420",
+  "abi_reference": "arXiv:2510.09272 (Steffin/Classen)",
+  "note": "Heuristic x16 decode \u2014 verify manually",
+  "sites": [
+    {
+      "site_va": "0x000000000009f8d4",
+      "domain_id": null,
+      "domain_name": null,
+      "table_id": null,
+      "table_name": null,
+      "endpoint_id": null
+    }
+  ]
+}

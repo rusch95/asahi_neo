@@ -2,6 +2,22 @@
 
 Last updated: 2026-03-14
 
+## CRITICAL FINDING (2026-03-14)
+
+Developing **on** the target hardware (MacBook Neo, A18 Pro, t8140, macOS 26.3.2).
+macOS on A18 Pro uses **PPL**, not SPTM — zero genter instructions in the macOS kernel.
+SPTM blobs extracted locally. Two paths in scope:
+
+- **Path A (PPL):** Boot macOS-style kernelcache → iBoot won't activate SPTM →
+  follows existing Asahi M3 path. **Primary path for Phase 1.**
+- **Path B (SPTM):** Boot iOS-style kernelcache → iBoot activates SPTM → full shim.
+  Research path, harder.
+
+Key open question: does iBoot activate SPTM for our custom Permissive Security
+kernelcache regardless of OS type? Must verify empirically.
+
+---
+
 ## Current Focus: Phase 0 — Research & Environment
 
 ---
@@ -27,10 +43,24 @@ Last updated: 2026-03-14
 - [ ] Check AsahiLinux/linux M4 branch for any SPTM-related kernel patches
 
 ### 0.2 XNU Kernelcache Analysis
-- [ ] Pull M4 / A18 Pro XNU kernelcache from recoveryOS or IPSW
-- [ ] Identify the exact SPTM init call sequence in XNU startup (osfmk/arm/cpu.c et al.)
-- [ ] Find the earliest point after SPTM init where we can safely intercept control
-- [ ] Determine minimum kexts / startup extensions required for SPTM to succeed
+- [x] Kernelcache located at /System/Library/KernelCollections/BootKernelExtensions.kc (64MB)
+- [x] Confirmed: macOS A18 Pro kernel uses PPL, not SPTM (0 genter instructions)
+- [x] PPL functions confirmed: pmap_in_ppl, pmap_claim_reserved_ppl_page etc.
+- [ ] Disassemble PPL enter/exit mechanism in macOS A18 Pro XNU (what replaces HINT #0x10?)
+- [ ] Identify earliest safe intercept point post-PPL-init (Path A)
+- [ ] If pursuing Path B: identify SPTM init sequence in iOS XNU (requires iOS kernelcache)
+- [ ] Determine minimum kexts required for PPL to complete init (Path A)
+
+### 0.2b Local Hardware Analysis (NEW — we are on target hardware)
+- [x] Confirmed chip: A18 Pro, t8140, board Mac17,5
+- [x] Confirmed iBoot: 13822.81.10
+- [x] Extracted SPTM blobs: sptm.t8140.bin (1.1MB) and sptm.t8132.bin (M4, 1.1MB)
+- [x] Diff result: 27.4% byte difference — cannot assume identical ABI
+- [x] genter found in SPTM binary at 0x9f8d4 (1 site — SPTM's own init/self-call)
+- [ ] Dump ADT via ioreg and convert to FDT (script: dump_adt.py — adapt for macOS ioreg)
+- [ ] Run r2/Ghidra structural diff on t8140 vs t8132 SPTM binaries
+- [ ] Determine iBoot behavior: does it activate SPTM for non-iOS Permissive boot?
+- [ ] Explore PPL call mechanism in macOS A18 Pro — find PPL enter/exit opcodes
 
 ### 0.3 m1n1 / Toolchain Setup
 - [ ] Build m1n1 from source targeting M4 (closest available proxy for A18 Pro)

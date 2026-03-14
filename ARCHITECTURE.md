@@ -4,21 +4,39 @@ Last updated: 2026-03-14
 
 ## Overview
 
-On A18 Pro (and M4), Apple's SPTM (Secure Page Table Monitor) runs at GL2 — a
-**lateral** hardware privilege domain implemented via GXF (Guarded Execution Feature),
-distinct from the ARM EL hierarchy. GL2 is not "above EL2"; it is a separate trust
-dimension enforced by SPRR (Shadow Permission Remapping Register). SPTM code pages
-are marked executable only in GL2 (via SPRR permission table), so even full EL1
-code execution cannot run SPTM code or bypass its page table protections.
+### Critical Discovery (2026-03-14)
 
-SPTM owns all page table management; the OS kernel requests mappings via `genter`
-rather than writing page tables directly. This breaks the assumption all prior Apple
-Silicon Linux ports (M1/M2) make — those chips used PPL (Page Protection Layer),
-a predecessor that also ran at GL2 but was embedded in the XNU kernelcache itself.
-SPTM is separate firmware, initialized by iBoot, not part of the kernelcache.
+We are developing **on** the target hardware (MacBook Neo, A18 Pro, t8140).
+Scanning the running macOS 26 kernelcache revealed: **macOS on A18 Pro uses PPL,
+not SPTM**. Zero `genter` instructions exist in the entire macOS kernel. SPTM is
+activated by iBoot only for iOS kernelcaches; macOS continues to use PPL.
 
-The XNU Shim exploits the fact that iBoot + XNU can legitimately initialize SPTM.
-We let them do so, intercept at the last safe moment, and pivot to Linux.
+This opens two distinct boot paths:
+
+**Path A — macOS/PPL (primary for Phase 1):**
+Boot a macOS-style custom kernelcache. iBoot likely won't activate SPTM. The PPL
+challenge is well-understood by Asahi Linux (M1/M2/M3). This is the lower-risk path
+to a first terminal boot.
+
+**Path B — iOS/SPTM (research path):**
+Boot an iOS-style XNU kernelcache that activates SPTM. Requires the full SPTM shim
+architecture. Higher difficulty, but necessary to understand the long-term A18 Pro
+security model and for any future hardened Linux deployment.
+
+---
+
+On A18 Pro, Apple's SPTM (Secure Page Table Monitor) runs at GL2 — a **lateral**
+hardware privilege domain implemented via GXF (Guarded Execution Feature). SPTM is
+separate firmware loaded by iBoot before the kernel. GL2 is not "above EL2"; it is
+a separate trust dimension enforced by SPRR. SPTM code pages are executable only in
+GL2, so EL1 kernel exploits cannot touch page tables directly.
+
+PPL (Page Protection Layer) — the M1/M2/M3 predecessor — also runs at GL2 but is
+embedded in the XNU kernelcache itself, not separate firmware.
+
+The XNU Shim exploits the fact that iBoot + XNU can legitimately initialize whichever
+security mechanism is active (PPL or SPTM). We let that initialization complete,
+intercept at the last safe moment, and pivot to Linux.
 
 ---
 

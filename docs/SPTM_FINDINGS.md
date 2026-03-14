@@ -381,15 +381,60 @@ For Linux booting, TXM is irrelevant — we don't need code signing for our page
 
 ---
 
-## A18 Pro vs M4 Status
+## Critical Finding: macOS on A18 Pro Uses PPL, Not SPTM
+
+**Discovered 2026-03-14 by scanning the running system's kernelcache.**
+
+Hardware: MacBook Neo, chip-id 0x8140 (t8140 = A18 Pro), macOS 26.3.2 (Tahoe).
+
+Scan of `/System/Library/KernelCollections/BootKernelExtensions.kc`:
+- `genter` (0x00201420): **0 occurrences**
+- `SPTM`/`sptm_retype`/`gxf_setup` strings: **not found**
+- `_ppl` functions (e.g. `pmap_in_ppl`, `pmap_claim_reserved_ppl_page`): **present**
+
+**Conclusion:** macOS on A18 Pro (even macOS 26 / Tahoe) still uses **PPL** (Page
+Protection Layer), the same mechanism as M1/M2/M3. SPTM is only activated on this
+hardware when booting iOS. The SPTM firmware blob (`sptm.t8140.release.im4p`) is
+present in the Preboot partition but is NOT loaded by the macOS boot chain.
+
+**Implication:** iBoot chooses the security mechanism based on the OS being booted,
+not just the hardware. The A18 Pro hardware supports SPTM, but macOS uses PPL.
+
+**Impact on this project — two boot paths now in scope:**
+
+| Path | Mechanism | Difficulty | Relevance |
+|------|-----------|-----------|-----------|
+| **Path A: macOS/PPL** | PPL (same as M1-M3 Asahi) | Lower | More directly follows Asahi M3 work |
+| **Path B: iOS/SPTM** | SPTM via genter | Higher | Requires iOS-style XNU shim |
+
+**Path A is now the primary path for Phase 1 (boot to terminal).** If iBoot doesn't
+activate SPTM for our macOS-style custom kernelcache, we face the PPL challenge that
+Asahi has already largely solved for M1-M3.
+
+**Open question:** Will iBoot activate SPTM when booting our custom non-Apple kernelcache
+under Permissive Security? Needs empirical testing. If iBoot always activates SPTM on
+A18 Pro hardware regardless of what's being booted, Path A is not viable.
+
+## A18 Pro vs M4 SPTM Blob Status
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| SPTM generation | Same | Both A18 Pro era; paper confirmed M4 tested |
-| GXF encodings | CONFIRMED SAME | 0x00201420 / 0x00201400 stable |
-| Frame type table | Assumed same | Verify via blob diff |
-| Call ABI (x16 dispatch) | Assumed same | Verify via kernelcache diff |
+| SPTM blobs extracted | **DONE** | sptm.t8140.bin (1.1MB), sptm.t8132.bin (1.1MB) |
+| GXF encodings | CONFIRMED | 0x00201420/0x00201400 in t8140 binary |
+| Blob diff (t8140 vs t8132) | **DONE** | 27% byte diff — significant divergence |
+| ABI compatibility | UNKNOWN | 27% diff means do not assume identical call numbers |
+| macOS boot chain uses SPTM | **NO** | PPL only; SPTM only for iOS boot |
 | Physical memory layout | TBD | ADT dump required |
+
+### Blob Diff Analysis (t8140 vs t8132)
+
+Sizes: t8140=1,114,144 bytes, t8132=1,130,528 bytes (+16,384 byte delta).
+SHA-256 differ. Byte-level diff: **27.4%**. Header (first 256 bytes): 3 bytes differ.
+
+The 3-byte header difference suggests same binary format; the 27% body diff likely
+reflects chip-specific register offsets, hardware initialization sequences, and
+possibly new/modified SPTM functions for A18 Pro vs M4. **Cannot assume call ABI
+is identical.** Need Ghidra structural diff to determine if call table layout matches.
 
 ---
 
