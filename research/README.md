@@ -4,9 +4,12 @@ This directory holds reference material that informs the project but isn't code.
 
 ## To Obtain
 
-- [ ] **steffin_classen_sptm.pdf** — The Steffin/Classen paper on SPTM.
-      Search: "Apple SPTM Secure Page Table Monitor" in academic paper search.
-      Once obtained: read fully, annotate key findings into docs/SPTM_FINDINGS.md.
+- [ ] **papers/steffin_classen_sptm.pdf** — "Modern iOS Security Features — A Deep
+      Dive into SPTM, TXM, and Exclaves" by Moritz Steffin & Jiska Classen.
+      PDF: https://arxiv.org/pdf/2510.09272
+      Abstract: https://arxiv.org/abs/2510.09272
+      Once obtained: read fully, extract SPTM call table section, annotate into
+      docs/SPTM_FINDINGS.md. Focus on: call ABI, frame retyping, init sequence.
 
 - [ ] **m4_kernelcache/** — Extracted M4 XNU kernelcache from macOS 15.x IPSW.
       Extract via: `ipsw` tool or manual APFS extraction.

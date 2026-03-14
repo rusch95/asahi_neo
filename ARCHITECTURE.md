@@ -4,11 +4,18 @@ Last updated: 2026-03-14
 
 ## Overview
 
-On A18 Pro (and M4), Apple's SPTM (Secure Page Table Monitor) runs at GXF EL2 —
-a privilege level above the OS kernel (EL1) but below the hypervisor (EL2 proper).
-SPTM owns all page table management; the OS kernel requests mappings through it rather
-than writing page tables directly. This breaks the assumption all prior Apple Silicon
-Linux ports make (direct EL1 page table control).
+On A18 Pro (and M4), Apple's SPTM (Secure Page Table Monitor) runs at GL2 — a
+**lateral** hardware privilege domain implemented via GXF (Guarded Execution Feature),
+distinct from the ARM EL hierarchy. GL2 is not "above EL2"; it is a separate trust
+dimension enforced by SPRR (Shadow Permission Remapping Register). SPTM code pages
+are marked executable only in GL2 (via SPRR permission table), so even full EL1
+code execution cannot run SPTM code or bypass its page table protections.
+
+SPTM owns all page table management; the OS kernel requests mappings via `genter`
+rather than writing page tables directly. This breaks the assumption all prior Apple
+Silicon Linux ports (M1/M2) make — those chips used PPL (Page Protection Layer),
+a predecessor that also ran at GL2 but was embedded in the XNU kernelcache itself.
+SPTM is separate firmware, initialized by iBoot, not part of the kernelcache.
 
 The XNU Shim exploits the fact that iBoot + XNU can legitimately initialize SPTM.
 We let them do so, intercept at the last safe moment, and pivot to Linux.
@@ -34,27 +41,46 @@ Security contains a stripped XNU + our shim object linked in.
 
 ## Privilege Levels on A18 Pro / M4
 
+GXF adds a LATERAL dimension (GL0/GL1/GL2) orthogonal to the ARM EL hierarchy.
+Each EL can have a corresponding GL, enforced by SPRR remapping page permissions.
+
 ```
-EL3     — Secure Monitor (Apple firmware, immutable)
-GXF EL2 — SPTM (Guarded Execution Feature, page table owner)
-EL2     — Available for hypervisor (m1n1 uses this in dev)
-EL1     — OS kernel (XNU or Linux)
-EL0     — Userspace
+ARM EL levels:          GXF lateral domains (SPRR-enforced):
+
+EL3  Secure Monitor     (no GXF interaction)
+EL2  Hypervisor ──────► GL2  SPTM  (page table owner, reached via genter from EL1/EL2)
+EL1  OS kernel  ──────► GL1  TXM   (code signing / entitlements)
+EL0  Userspace          GL0  (unused currently)
 ```
 
-GXF is Apple's name for a hardware feature that inserts an additional privilege domain.
-Transitions to GXF EL2 happen via `genter` / `gexit` instructions. SPTM exposes a
-call table; the OS calls into it for all page table mutations.
+- `genter` (encoding: `0x00201420`) — transitions current EL into its GL counterpart
+- `gexit`  (encoding: `0x00201400`) — returns from GL to the calling EL
+- SPRR makes SPTM code pages executable ONLY in GL2; EL1 cannot execute them
+- The OS kernel calls SPTM for every page table mutation via `genter` → GL2 → `gexit`
 
-**Implication for Linux:** Linux's `__cpu_setup` and `paging_init` paths must be patched
-or wrapped to call through the SPTM interface rather than writing TTBR0/TTBR1 directly.
-Alternatively, the shim can set up a thin compatibility layer that traps Linux page table
-writes and forwards them to SPTM — but this is heavyweight.
+**Key registers (from m1n1 source / Sven Peter blog):**
+- `SYS_IMP_APL_SPRR_CONFIG_EL1` (`S3_6_C15_C1_0`) — enable SPRR
+- `SYS_IMP_APL_GXF_CONFIG_EL1`  (`S3_6_C15_C1_2`) — enable GXF
+- `SYS_IMP_APL_GXF_ENTER_EL1`   (`S3_6_C15_C8_1`) — GL2 entry point address
+- `SYS_IMP_APL_GXF_STATUS_EL1`  — GXF active status
 
-**Preferred approach:** Modify Linux's ARM64 mm init to call a small SPTM shim layer
-for initial mapping setup, then hand SPTM a "trusted kernel" designation so subsequent
-page table ops work normally. Whether SPTM supports this trust handoff is TBD — see
-docs/SPTM_FINDINGS.md.
+**SPRR permission table:** 64-bit register encoding 16 4-bit nibbles, each mapping
+one page table permission class to separate EL/GL access rights. SPTM sets this
+table to prevent EL1 from creating writable+executable mappings in its own domain.
+
+**SPTM call ABI (from Steffin/Classen paper):** Calls use the `genter` instruction
+with `x16` holding a packed dispatch descriptor (domain | table_id | endpoint_id).
+`x0–x7` are arguments. Key calls our shim must make:
+- `sptm_retype(phys, FREE, XNU_DEFAULT, ...)` — claim Linux pages
+- `sptm_retype(phys, FREE, XNU_PAGE_TABLE, ...)` — claim page table pages
+- `sptm_map_page(ttep, va, pte)` — build Linux address space
+
+**No SPTM watchdog:** After handoff, SPTM is passive. Linux won't be killed.
+
+**Capability model:** SPTM has no per-call XNU identity check. Whoever registers
+dispatch tables during `init_xnu_ro_data` controls those domains. Our shim runs
+after this window — we call SPTM using XNU domain credentials already registered.
+See docs/SPTM_FINDINGS.md for full ABI details.
 
 ---
 
@@ -92,9 +118,11 @@ Reserve for if Option A proves too late in the boot (e.g., SPTM needs kernel
 cooperation after this point).
 
 **Option C — m1n1 hypervisor mediation:**
-Run XNU under m1n1's EL2 hypervisor. Use hypervisor hooks to intercept the
-GXF→EL1 transition after SPTM init, then replace XNU's EL1 context with Linux.
-Cleanest for research/debugging; not suitable for standalone boots.
+Run XNU under m1n1's EL2 hypervisor. m1n1 has native GXF support (`src/gxf.c`,
+`src/gxf_asm.S`) and can call into GL2 itself via `gl2_call()`. Use hypervisor
+hooks to log all `genter` calls during XNU boot (maps call sequence), then intercept
+the GL2→EL1 `gexit` after SPTM init completes and replace XNU's EL1 context with
+Linux. Cleanest for research/debugging; not suitable for standalone boots.
 
 ---
 
@@ -128,7 +156,12 @@ Reference: AsahiLinux/linux arch/arm64/boot/dts/apple/ for M4 DT as a template.
 1. Can SPTM accept a "handoff" to a non-XNU kernel, or does it enforce XNU identity?
 2. What is the minimum SPTM call sequence XNU must complete before we can intercept?
 3. Does SPTM have a watchdog that kills EL1 if certain heartbeat calls stop?
-4. Are GXF `genter`/`gexit` encodings the same on A18 Pro as M4?
+4. ~~Are GXF `genter`/`gexit` encodings the same on A18 Pro as M4?~~
+   **ANSWERED:** Yes. `genter=0x00201420`, `gexit=0x00201400` — confirmed from m1n1
+   source (`gxf_asm.S`) and Sven Peter's public reverse-engineering. Encodings are
+   stable across A16/M3/M4/A18 Pro generations.
 5. Does A18 Pro DRAM layout differ significantly from M4?
+6. Does SPTM on A18 Pro use the same call ABI as M4? (Assume yes; verify via blob diff)
+7. Can our shim call `genter` after XNU's SPTM init to request new GL2 mappings for Linux?
 
 All answers go in docs/SPTM_FINDINGS.md as discovered.

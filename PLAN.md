@@ -9,12 +9,22 @@ Last updated: 2026-03-14
 ## Phase 0: Research & Environment Setup
 
 ### 0.1 SPTM / GXF Reverse Engineering
-- [ ] Read Steffin/Classen paper in full; annotate key findings into docs/SPTM_FINDINGS.md
-- [ ] Extract SPTM firmware blob from A18 Pro / M4 iBoot chain
-- [ ] Map SPTM call table: identify init, map, unmap, perm-change entry points
-- [ ] Document GXF EL2 privilege model — what the OS kernel can/cannot do to page tables
-- [ ] Determine SPTM state machine: what XNU must call before SPTM is "ready"
-- [ ] Check whether M4 Asahi work has already reversed any of this (see AsahiLinux/linux M4 branch)
+- [x] Locate Steffin/Classen paper: arXiv 2510.09272 — downloaded to research/papers/
+- [x] Read Steffin/Classen paper in full — key findings in docs/SPTM_FINDINGS.md
+- [x] Document GXF privilege model (GL0/GL1/GL2 lateral domains, SPRR, genter/gexit)
+- [x] Confirm genter=0x00201420, gexit=0x00201400 from m1n1 gxf_asm.S — VERIFIED
+- [x] Confirm SPRR/GXF register names from m1n1 source
+- [x] Document SPTM call ABI: x16 dispatch descriptor (domain/table/endpoint), NOT x0
+- [x] Document SPTM initialization sequence: gxf_setup_early → gxf_setup_late → init_xnu_ro_data
+- [x] Document frame retyping model (63 types, transition rules)
+- [x] Confirm: no SPTM watchdog/heartbeat — safe to hand off to Linux post-init
+- [x] Confirm: SPTM is capability-based — no per-call cryptographic XNU identity check
+- [ ] Read Proteas SPTM notes: https://proteas.github.io/ios/2023/06/09/some-quick-and-discrete-notes-on-sptm.html
+- [ ] Read Dataflow Forensics SPTM series: https://www.df-f.com/blog/sptm4
+- [ ] Extract SPTM firmware blob from M4 IPSW (use `ipsw` CLI tool)
+- [ ] Run scripts/extract_sptm_calls.py against M4 kernelcache to map endpoint IDs
+- [ ] Determine minimum XNU SPTM call sequence before safe intercept (empirical, via probe)
+- [ ] Check AsahiLinux/linux M4 branch for any SPTM-related kernel patches
 
 ### 0.2 XNU Kernelcache Analysis
 - [ ] Pull M4 / A18 Pro XNU kernelcache from recoveryOS or IPSW
@@ -27,7 +37,10 @@ Last updated: 2026-03-14
 - [ ] Confirm tethered boot works over USB-C UART on target hardware
 - [ ] Set up ARM64 cross-compilation toolchain (clang + lld)
 - [ ] Set up Python proxyclient environment for m1n1 scripting
-- [ ] Write scripts/probe_sptm.py — use m1n1 hypervisor to observe SPTM calls during XNU boot
+- [ ] Implement scripts/probe_sptm.py using m1n1's existing gl2_call() / gxf hooks
+      (m1n1 has native GXF support in src/gxf.c — we can set GXF_ENTER_EL1 to our
+      logging stub before loading XNU as guest, intercept every genter call)
+- [ ] Install ipsw CLI tool (https://github.com/blacktop/ipsw) for IPSW extraction
 
 ### 0.4 Linux Kernel Baseline
 - [ ] Identify which AsahiLinux/linux branch has the most M4 progress
