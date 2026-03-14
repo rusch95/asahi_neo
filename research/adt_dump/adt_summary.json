@@ -1,0 +1,62 @@
+{
+  "aic": {
+    "phys": 12901679104,
+    "size": 1884160,
+    "compatible": "aic,3"
+  },
+  "uart4": {
+    "phys": 15118434304,
+    "size": 16384,
+    "compatible": "uart-1,samsung",
+    "label": "wlan-debug"
+  },
+  "uart5": {
+    "phys": 15118450688,
+    "size": 16384,
+    "compatible": "uart-1,samsung",
+    "label": "bluetooth-debug"
+  },
+  "cpus": [
+    {
+      "name": "cpu0",
+      "cluster": "E",
+      "compatible": "apple,sawtooth",
+      "mpidr": 0
+    },
+    {
+      "name": "cpu1",
+      "cluster": "E",
+      "compatible": "apple,sawtooth",
+      "mpidr": 1
+    },
+    {
+      "name": "cpu2",
+      "cluster": "E",
+      "compatible": "apple,sawtooth",
+      "mpidr": 2
+    },
+    {
+      "name": "cpu3",
+      "cluster": "E",
+      "compatible": "apple,sawtooth",
+      "mpidr": 3
+    },
+    {
+      "name": "cpu4",
+      "cluster": "P",
+      "compatible": "apple,everest",
+      "mpidr": 256
+    },
+    {
+      "name": "cpu5",
+      "cluster": "P",
+      "compatible": "apple,everest",
+      "mpidr": 257
+    }
+  ],
+  "dram": {
+    "base": 1099511627776,
+    "size": 8589934592,
+    "hw_memsize": 8589934592
+  }
+}

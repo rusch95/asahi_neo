@@ -46,8 +46,12 @@ kernelcache regardless of OS type? Must verify empirically.
 - [x] Kernelcache located at /System/Library/KernelCollections/BootKernelExtensions.kc (64MB)
 - [x] Confirmed: macOS A18 Pro kernel uses PPL, not SPTM (0 genter instructions)
 - [x] PPL functions confirmed: pmap_in_ppl, pmap_claim_reserved_ppl_page etc.
-- [ ] Disassemble PPL enter/exit mechanism in macOS A18 Pro XNU (what replaces HINT #0x10?)
-- [ ] Identify earliest safe intercept point post-PPL-init (Path A)
+- [x] Disassemble PPL enter/exit mechanism in macOS A18 Pro XNU — **FOUND 2026-03-14**
+      HINT #0x1b (0xD503237F) = PPL enter, HINT #0x1f (0xD50323FF) = PPL exit,
+      HINT #0x22 (0xD503245F) = pmap_in_ppl check. All verified in 121MB ARM64 kernelcache.
+      NOTE: BootKernelExtensions.kc is x86_64; real ARM64 KC is in Preboot im4p.
+- [x] Identify earliest safe intercept point post-PPL-init (Path A) — IOPlatformExpert::start()
+      is post-PPL-init; this is the Option A hook target. Confirmed via SPTM findings.
 - [ ] If pursuing Path B: identify SPTM init sequence in iOS XNU (requires iOS kernelcache)
 - [ ] Determine minimum kexts required for PPL to complete init (Path A)
 
@@ -57,10 +61,21 @@ kernelcache regardless of OS type? Must verify empirically.
 - [x] Extracted SPTM blobs: sptm.t8140.bin (1.1MB) and sptm.t8132.bin (M4, 1.1MB)
 - [x] Diff result: 27.4% byte difference — cannot assume identical ABI
 - [x] genter found in SPTM binary at 0x9f8d4 (1 site — SPTM's own init/self-call)
-- [ ] Dump ADT via ioreg and convert to FDT (script: dump_adt.py — adapt for macOS ioreg)
+- [x] ARM64 kernelcache extracted: Preboot im4p → research/firmware/kernelcache.mac17g.bin
+      (121MB MH_FILESET arm64e). BootKernelExtensions.kc is x86_64 — do NOT use it for A18 Pro analysis.
+- [x] PPL opcodes confirmed in ARM64 KC: HINT#0x1b=enter, HINT#0x1f=exit, HINT#0x22=check
+- [x] Dump ADT via ioreg — **DONE 2026-03-14** → research/adt_dump/adt_summary.json
+      AIC=0x301000000, uart4=0x385210000 (wlan-debug), uart5=0x385214000 (bt-debug)
+      CPU: 4×E-core (sawtooth, mpidr 0–3) + 2×P-core (everest, mpidr 0x100–0x101)
+      DRAM: 8GB, ADT dram-base=0x10000000000 — SUSPECT, needs m1n1 verification
+- [x] Generate stub Linux DTS → research/adt_dump/stub_a18pro.dts
+      Addresses confirmed; UART IRQ, clock nodes, DRAM base are TODOs
+- [x] PPL enter/exit opcodes found — HINT#0x1b/HINT#0x1f (see SPTM_FINDINGS.md)
+      "Explore PPL call mechanism" task is now complete.
 - [ ] Run r2/Ghidra structural diff on t8140 vs t8132 SPTM binaries
 - [ ] Determine iBoot behavior: does it activate SPTM for non-iOS Permissive boot?
-- [ ] Explore PPL call mechanism in macOS A18 Pro — find PPL enter/exit opcodes
+- [ ] Investigate DRAM base — verify 0x10000000000 via m1n1 once tethered boot is set up
+- [ ] Resolve UART compatible string: "apple,s5l-uart" vs "samsung,s3c2410-uart" for Linux driver
 
 ### 0.3 m1n1 / Toolchain Setup
 - [ ] Build m1n1 from source targeting M4 (closest available proxy for A18 Pro)
@@ -86,7 +101,8 @@ kernelcache regardless of OS type? Must verify empirically.
 - [ ] Implement Linux ELF loader within shim
 - [ ] Map Linux kernel image via SPTM calls (read-only + executable pages)
 - [ ] Set up Linux boot args struct (FDT / device tree pointer)
-- [ ] Write minimal A18 Pro device tree (DT) — serial UART only
+- [~] Write minimal A18 Pro device tree (DT) — stub created at research/adt_dump/stub_a18pro.dts
+      Still needs: DRAM base verification, UART IRQ specifier, clock nodes
 - [ ] Transfer execution to Linux `__primary_switch`
 - [ ] Milestone: `[    0.000000] Booting Linux on physical CPU 0x0` on UART
 

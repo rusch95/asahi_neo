@@ -415,6 +415,79 @@ Asahi has already largely solved for M1-M3.
 under Permissive Security? Needs empirical testing. If iBoot always activates SPTM on
 A18 Pro hardware regardless of what's being booted, Path A is not viable.
 
+## PPL Opcode Encodings on A18 Pro macOS — **CONFIRMED 2026-03-14**
+
+The running macOS ARM64 kernelcache (`kernelcache.release.mac17g`, extracted from
+Preboot im4p at `research/firmware/kernelcache.mac17g.bin`, 121 MB, MH_FILESET arm64e)
+was disassembled to find the PPL enter/exit mechanism.
+
+> **Note:** `/System/Library/KernelCollections/BootKernelExtensions.kc` is **x86_64**
+> (Rosetta/Intel compatibility binary, cpu type 0x01000007). The actual A18 Pro ARM64
+> kernelcache is in the Preboot volume as an im4p-wrapped Mach-O. Always use the Preboot
+> kernelcache for A18 Pro analysis.
+
+### PPL Instruction Encodings (HINT family, A18 Pro macOS 26.3.2)
+
+| Instruction | Encoding | imm7 | Count in __TEXT_EXEC | Purpose |
+|-------------|----------|------|----------------------|---------|
+| `HINT #0x1b` | `0xD503237F` | 27 | **142,080** | **PPL function entry guard** — every PPL function starts with this |
+| `HINT #0x1f` | `0xD50323FF` | 31 | **32,833** | **PPL exit** — appears immediately before `RET` |
+| `HINT #0x22` | `0xD503245F` | 34 | **88,770** | **PPL context check** — `pmap_in_ppl` begins with this |
+| `HINT #0x24` | `0xD503249F` | 36 | 15,673 | Unknown — appears in exception handler context |
+
+### Evidence
+
+**`pmap_in_ppl` at `0xfffffe0008a7bfb4`:**
+```asm
+pmap_in_ppl:
+    HINT #0x22       ; 0xD503245F — if in PPL, trap returns W0=1; else fall through
+    MOV W0, #0       ; 0x52800000 — not in PPL
+    RET              ; 0xD65F03C0
+```
+
+**Typical PPL function (e.g., `pmap_claim_reserved_ppl_page` at `0xfffffe0008a7c700`):**
+```asm
+<ppl_function>:
+    HINT #0x1b       ; 0xD503237F — PPL enter: switch to GL1 if called from EL1
+    ...function body...
+    HINT #0x1f       ; 0xD50323FF — PPL exit: return to EL1
+    RET              ; 0xD65F03C0
+```
+
+The HINT #0x1f + RET sequence was verified across hundreds of PPL functions.
+
+### Comparison: PPL (macOS A18 Pro) vs SPTM (iOS A18 Pro)
+
+| Aspect | PPL on macOS A18 Pro | SPTM on iOS A18 Pro |
+|--------|---------------------|---------------------|
+| Entry to protected domain | `HINT #0x1b` | `genter` (0x00201420) |
+| Exit from protected domain | `HINT #0x1f` | `gexit` (0x00201400) |
+| Context check | `HINT #0x22` | (no direct equivalent — GXF_STATUS reg) |
+| Domain level | GL1 | GL2 |
+| Location | Embedded in XNU kernelcache | Separate iBoot-loaded firmware |
+| Shim path | Path A (primary) | Path B (research) |
+
+### Implication for Path A (macOS/PPL boot)
+
+For our shim to intercept after PPL init and hand off to Linux, it must:
+1. Be linked into the macOS-style kernelcache (iBoot won't activate SPTM for this)
+2. Let `gxf_setup_early` / `gxf_setup_late` and PPL initialization run normally
+3. Intercept at `IOPlatformExpert::start()` — by this point PPL is fully initialized
+4. Load Linux, set up FDT, transfer control
+
+Unlike SPTM (Path B), PPL does not require explicit frame retyping calls from our
+shim. The PPL is simpler: it restricts page table modifications to GL1 code only.
+After we hand off to Linux, Linux will run at EL1 and won't need to interact with
+PPL (since SPTM is not active, there's no watchdog; PPL will remain initialized
+but Linux won't call into it).
+
+**Key open question:** Does Linux need to be aware of PPL (i.e., will PPL's SPRR
+settings prevent Linux from setting up its own page tables)? Linux at EL1 cannot
+call into GL1, so it cannot modify page tables through the PPL gate. The Asahi Linux
+project must have solved this for M1/M2/M3 — investigate their pmap solution.
+
+---
+
 ## A18 Pro vs M4 SPTM Blob Status
 
 | Feature | Status | Notes |
