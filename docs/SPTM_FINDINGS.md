@@ -84,37 +84,100 @@ sptm_dispatch_target_t (64-bit value placed in x16 before genter):
 
 Standard AArch64 calling convention: `x0–x7` = arguments, `x0` = return value.
 
-### Domains
+### Domains (from `sptm_common.h`, confirmed in paper Appendix A.2)
 
 | ID | Name | Permission mask |
 |----|------|----------------|
 | 0  | `SPTM_DOMAIN`    | — |
-| 1  | `XNU_DOMAIN`     | 0x2 |
-| 2  | `TXM_DOMAIN`     | 0x4 |
-| 3  | `SK_DOMAIN`      | 0x8 |
+| 1  | `XNU_DOMAIN`     | 0x02 |
+| 2  | `TXM_DOMAIN`     | 0x04 |
+| 3  | `SK_DOMAIN`      | 0x08 |
 | 4  | `XNU_HIB_DOMAIN` | 0x10 |
+| 5  | `MAX_DOMAINS`    | (sentinel) |
+
+### Dispatch Table IDs (from `sptm_common.h`, confirmed in paper Appendix A.3)
+
+| ID | Name |
+|----|------|
+| 0  | `SPTM_DISPATCH_TABLE_XNU_BOOTSTRAP` |
+| 1  | `SPTM_DISPATCH_TABLE_TXM_BOOTSTRAP` |
+| 2  | `SPTM_DISPATCH_TABLE_SK_BOOTSTRAP` |
+| 3  | `SPTM_DISPATCH_TABLE_T8110_DART_XNU` |
+| 4  | `SPTM_DISPATCH_TABLE_T8110_DART_SK` |
+| 5  | `SPTM_DISPATCH_TABLE_SART` |
+| 6  | `SPTM_DISPATCH_TABLE_NVME` |
+| 7  | `SPTM_DISPATCH_TABLE_UAT` |
+| 8  | `SPTM_DISPATCH_TABLE_SHART` |
+| 9  | `SPTM_DISPATCH_TABLE_RESERVED` |
+| 10 | `SPTM_DISPATCH_TABLE_HIB` |
+| 11 | `SPTM_DISPATCH_TABLE_INVALID` |
+
+### Endpoint IDs (from `sptm_xnu.h`, confirmed in paper Appendix A.4)
+
+| ID | Name | Relevance to Linux boot |
+|----|------|------------------------|
+| 0  | `SPTM_FUNCTIONID_LOCKDOWN` | — |
+| **1**  | **`SPTM_FUNCTIONID_RETYPE`** | **Claim frames for Linux (FREE→XNU_DEFAULT)** |
+| **2**  | **`SPTM_FUNCTIONID_MAP_PAGE`** | **Build Linux page table entries** |
+| **3**  | **`SPTM_FUNCTIONID_MAP_TABLE`** | **Install page table pages** |
+| 4  | `SPTM_FUNCTIONID_UNMAP_TABLE` | — |
+| 5  | `SPTM_FUNCTIONID_UPDATE_REGION` | May be needed for TTBR setup |
+| 6  | `SPTM_FUNCTIONID_UPDATE_DISJOINT` | — |
+| 7  | `SPTM_FUNCTIONID_UNMAP_REGION` | — |
+| 8  | `SPTM_FUNCTIONID_UNMAP_DISJOINT` | — |
+| 9  | `SPTM_FUNCTIONID_CONFIGURE_SHAREDREGION` | — |
+| 10 | `SPTM_FUNCTIONID_NEST_REGION` | — |
+| 11 | `SPTM_FUNCTIONID_UNNEST_REGION` | — |
+| 12 | `SPTM_FUNCTIONID_CONFIGURE_ROOT` | May be needed for TTBR0/TTBR1 |
+| 13 | `SPTM_FUNCTIONID_SWITCH_ROOT` | **Switch to Linux root page table?** |
+| **14** | **`SPTM_FUNCTIONID_REGISTER_CPU`** | **Per-CPU registration — must call for each core** |
+| 15 | `SPTM_FUNCTIONID_FIXUPS_COMPLETE` | — |
+| 16 | `SPTM_FUNCTIONID_SIGN_USER_POINTER` | — |
+| 17 | `SPTM_FUNCTIONID_AUTH_USER_POINTER` | — |
+| 18 | `SPTM_FUNCTIONID_REGISTER_EXC_RETURN` | — |
+| 19 | `SPTM_FUNCTIONID_CPU_ID` | Get CPU ID |
+| 20 | `SPTM_FUNCTIONID_SLIDE_REGION` | KASLR slide application |
+| 21 | `SPTM_FUNCTIONID_UPDATE_DISJOINT_MULTIPAGE` | — |
+| 22 | `SPTM_FUNCTIONID_REG_READ` | — |
+| 23 | `SPTM_FUNCTIONID_REG_WRITE` | — |
+| 24–28 | `SPTM_FUNCTIONID_GUEST_*` | Hypervisor/VM guest support |
+| 29 | `SPTM_FUNCTIONID_MAP_SK_DOMAIN` | — |
+| 30–32 | `SPTM_FUNCTIONID_HIB_*` | Hibernation |
+| 33 | `SPTM_FUNCTIONID_IOFILTER_PROTECTED_WRITE` | — |
 
 ### Dispatch Table Registration
 
-During `init_xnu_ro_data`, XNU registers its dispatch tables with SPTM:
+During `init_xnu_ro_data`, XNU registers dispatch tables:
 
 ```c
-sptm_register_dispatch_table(0,  dispatch_entry, 2);   // XNU_BOOTSTRAP,  XNU_DOMAIN
-sptm_register_dispatch_table(1,  dispatch_entry, 4);   // TXM_BOOTSTRAP,  TXM_DOMAIN
-sptm_register_dispatch_table(2,  dispatch_entry, 8);   // SK_BOOTSTRAP,   SK_DOMAIN
-sptm_register_dispatch_table(10, dispatch_entry, 0x10);// HIB,            XNU_HIB_DOMAIN
+sptm_register_dispatch_table(0,  dispatch_entry, 2);    // XNU_BOOTSTRAP, XNU_DOMAIN
+sptm_register_dispatch_table(1,  dispatch_entry, 4);    // TXM_BOOTSTRAP, TXM_DOMAIN
+sptm_register_dispatch_table(2,  dispatch_entry, 8);    // SK_BOOTSTRAP,  SK_DOMAIN
+sptm_register_dispatch_table(10, dispatch_entry, 0x10); // HIB,           XNU_HIB_DOMAIN
 ```
 
-**Key insight for our shim:** SPTM's trust model is capability-based — the dispatch
-table registration is the trust grant. There is **no documented cryptographic identity
-check** at call time. Whoever registers a dispatch table during the early boot window
-controls that domain. Our shim can register its own dispatch tables if it runs during
-or after `init_xnu_ro_data`.
+NVME dispatch table registers with permission 0x12 (XNU_DOMAIN | XNU_HIB_DOMAIN).
 
-### Key SPTM Call Functions (from paper)
+**Key insight for our shim:** Capability-based trust — no per-call XNU identity check.
+Our shim (running post `init_xnu_ro_data`) calls SPTM using registered XNU domain
+credentials. SPTM dispatches based on encoded domain, not caller identity.
+
+### Calling a SPTM Function (canonical example: RETYPE)
+
+```asm
+; Call SPTM_FUNCTIONID_RETYPE (endpoint 1) as XNU_DOMAIN (id 1) on table 0 (XNU_BOOTSTRAP)
+; x16 = (domain=1 << 48) | (table=0 << 32) | (endpoint=1)
+movz x16, #0x1              ; endpoint_id = 1 (RETYPE)
+movk x16, #0x0, lsl #32     ; table_id = 0 (XNU_BOOTSTRAP)
+movk x16, #0x1, lsl #48     ; domain = 1 (XNU_DOMAIN)
+; x0–x3 = arguments to sptm_retype()
+.long 0x00201420             ; genter
+```
+
+### Key Function Signatures (from XNU source / paper)
 
 ```c
-// Retype a physical frame
+// Claim a physical frame for use
 void sptm_retype(
     pmap_paddr_t        physical_address,
     sptm_frame_type_t   previous_type,
@@ -123,22 +186,55 @@ void sptm_retype(
 
 // Map a page into a page table
 sptm_return_t sptm_map_page(
-    pmap_paddr_t  ttep,     // page table physical addr
-    vm_address_t  va,       // virtual address to map
-    pt_entry_t    new_pte); // new page table entry
-
-// Update SPRR permissions (via PAPT)
-void sptm_update_disp_perm(...);
+    pmap_paddr_t  ttep,      // page table physical addr
+    vm_address_t  va,        // virtual address to map
+    pt_entry_t    new_pte);  // new page table entry
 ```
 
-### Calling Example (XNU → endpoint 0xf)
+---
 
-```asm
-movk x16, #<domain_encoded>, LSL #48
-movk x16, #<table_id>,       LSL #32
-movk x16, #0xf               ; endpoint_id = 0xf
-.long 0x00201420             ; genter
-```
+## Symbol Address Map (A18 Pro t8140, iOS 18.4 / 22E240)
+
+From paper Appendix A.1. These are virtual addresses in the SPTM binary loaded by
+iBoot. Useful as Ghidra/r2 base offsets when analyzing the actual firmware blob.
+
+### SPTM Binary (`sptm.t8140.release`)
+
+| Symbol | Address |
+|--------|---------|
+| `gxf_setup_early` | `0xfffffff02708b8e8` |
+| `gxf_setup_late` | `0xfffffff02708b918` |
+| `gxf_entry_point` | `0xfffffff02708053c` |
+| `init_xnu_ro_data` | `0xfffffff0270987b4` |
+| `IOMMU_bootstrap` | `0xfffffff0270be298` |
+| `genter_dispatch_entry` | `0xfffffff0270bf3f8` |
+| `synchronous_exception_handler_from_lower` | `0xfffffff027081e38` |
+| `retype_frames` | `0xfffffff0270b4118` |
+| `retype` | `0xfffffff0270c4ad8` |
+| `map_page` | `0xfffffff0270c51d4` |
+| `PAPT_permission_update` | `0xfffffff0270b2a38` |
+| `sptm_dispatch` | `0xfffffff0270bf268` |
+| `XNU_BOOTSTRAP_TABLE` | `0xfffffff0270186d8` |
+| `TXM_BOOTSTRAP_TABLE` | `0xfffffff027018980` |
+| `AllowedCallerDomains` | `0xfffffff027019100` |
+| `CORE_DISPATCH_STRUCTURE_POINTER` | `0xfffffff027079500` |
+
+### XNU (kernelcache for iPhone 16 / A18 Pro)
+
+| Symbol | Address |
+|--------|---------|
+| `GENTER_main_gate` | `0xfffffff00ab3510c` |
+| `sptm_retype` | `0xfffffff0088ebc0c` |
+| `sptm_map_page` | `0xfffffff0088ebc24` |
+| `txm_kernel_call` | `0xfffffff0088eb384` |
+| `sk_enter` | `0xfffffff0088eb330` |
+
+### Secure Kernel (SK binary)
+
+| Symbol | Address |
+|--------|---------|
+| `main_sptm_gate` | `0xffffff8000001784` |
+| `register_dispatch_table` | `0xffffff8000004340` |
 
 ---
 

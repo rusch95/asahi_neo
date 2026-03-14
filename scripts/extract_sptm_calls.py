@@ -49,12 +49,58 @@ SPTM_DOMAINS: dict[int, str] = {
     4: "XNU_HIB_DOMAIN",
 }
 
-# Known dispatch tables
+# Dispatch Table IDs (from sptm_common.h, paper Appendix A.3)
 SPTM_TABLES: dict[int, str] = {
     0:  "XNU_BOOTSTRAP",
     1:  "TXM_BOOTSTRAP",
     2:  "SK_BOOTSTRAP",
+    3:  "T8110_DART_XNU",
+    4:  "T8110_DART_SK",
+    5:  "SART",
+    6:  "NVME",
+    7:  "UAT",
+    8:  "SHART",
+    9:  "RESERVED",
     10: "HIB",
+    11: "INVALID",
+}
+
+# Endpoint IDs (from sptm_xnu.h, paper Appendix A.4)
+SPTM_ENDPOINTS: dict[int, str] = {
+    0:  "LOCKDOWN",
+    1:  "RETYPE",           # sptm_retype() — claim frames
+    2:  "MAP_PAGE",          # sptm_map_page() — build PTEs
+    3:  "MAP_TABLE",
+    4:  "UNMAP_TABLE",
+    5:  "UPDATE_REGION",
+    6:  "UPDATE_DISJOINT",
+    7:  "UNMAP_REGION",
+    8:  "UNMAP_DISJOINT",
+    9:  "CONFIGURE_SHAREDREGION",
+    10: "NEST_REGION",
+    11: "UNNEST_REGION",
+    12: "CONFIGURE_ROOT",
+    13: "SWITCH_ROOT",
+    14: "REGISTER_CPU",
+    15: "FIXUPS_COMPLETE",
+    16: "SIGN_USER_POINTER",
+    17: "AUTH_USER_POINTER",
+    18: "REGISTER_EXC_RETURN",
+    19: "CPU_ID",
+    20: "SLIDE_REGION",
+    21: "UPDATE_DISJOINT_MULTIPAGE",
+    22: "REG_READ",
+    23: "REG_WRITE",
+    24: "GUEST_VA_TO_IPA",
+    25: "GUEST_STAGE1_TLBOP",
+    26: "GUEST_STAGE2_TLBOP",
+    27: "GUEST_DISPATCH",
+    28: "GUEST_EXIT",
+    29: "MAP_SK_DOMAIN",
+    30: "HIB_BEGIN",
+    31: "HIB_VERIFY_HASH_NON_WIRED",
+    32: "HIB_FINALIZE_NON_WIRED",
+    33: "IOFILTER_PROTECTED_WRITE",
 }
 
 
@@ -205,16 +251,15 @@ def main() -> None:
 
     # Print summary
     print("=== SPTM Dispatch Site Summary ===")
-    print(f"{'Domain':<20} {'Table':<18} {'Endpoint':>10}  {'Sites':>6}  VAs")
-    print("-" * 80)
+    print(f"{'Domain':<20} {'Table':<18} {'EP':>4}  {'Function':<32}  {'#':>4}  First VA")
+    print("-" * 95)
     for (dom, tbl, ep), addrs in sorted(call_groups.items()):
         dom_s = SPTM_DOMAINS.get(dom, f"?({dom})") if dom is not None else "?"
         tbl_s = SPTM_TABLES.get(tbl, f"TABLE_{tbl}") if tbl is not None else "?"
-        ep_s  = f"0x{ep:x}" if ep is not None else "?"
-        va_s  = ", ".join(f"0x{a:x}" for a in addrs[:3])
-        if len(addrs) > 3:
-            va_s += f" (+{len(addrs)-3} more)"
-        print(f"{dom_s:<20} {tbl_s:<18} {ep_s:>10}  {len(addrs):>6}  {va_s}")
+        ep_s  = f"{ep}" if ep is not None else "?"
+        fn_s  = SPTM_ENDPOINTS.get(ep, "UNKNOWN") if ep is not None else "?"
+        va_s  = f"0x{addrs[0]:x}" if addrs else "?"
+        print(f"{dom_s:<20} {tbl_s:<18} {ep_s:>4}  {fn_s:<32}  {len(addrs):>4}  {va_s}")
 
     print()
     print("NOTE: x16 extraction is heuristic. Verify with r2 / Ghidra disassembly.")
