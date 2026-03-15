@@ -1,9 +1,9 @@
 # Linux Host: Next Steps After First m1n1 Boot
 
-**Status as of 2026-03-14**: m1n1 (46fc983) boots successfully on A18 Pro (t8140,
-MacBook Neo, j700ap). Confirmed EL2, RAM base 0x10000000000, AIC v3 @ 0x301000000,
-DT compatible `apple,j700`. Machine is sitting in `Running proxy...` waiting for
-USB serial connection.
+**Status as of 2026-03-15**: m1n1 (30caac3, fork rusch95/m1n1) boots on A18 Pro
+(t8140, MacBook Neo, j700ap). Confirmed EL2, RAM base 0x10000000000, AIC v3 @
+0x301000000, DT compatible `apple,j700`. USB serial not yet confirmed working —
+latest build includes ATC0_USB fix, pending reinstall and test. See docs/USB_DEBUG.md.
 
 ---
 
@@ -224,19 +224,24 @@ Once `earlycon` output appears, priorities are:
 
 ---
 
-## m1n1.bin: Do Not Rebuild
+## m1n1.bin: Current State
 
-The current `m1n1.bin` at `46fc983` is HEAD of AsahiLinux/m1n1 main and boots
-correctly. Do not rebuild unless you have a specific fix to apply. The MCC and
-cpufreq warnings are expected — they reflect missing t8140 support in m1n1, not
-build problems.
+Working from fork `rusch95/m1n1`, branch `main`. **Do not use AsahiLinux/m1n1 HEAD**
+— it lacks t8140 USB fixes and pmgr1 support. Current commit: `30caac3`.
 
-If you do rebuild, the macOS build command is:
+Build command (macOS, in `/Users/rusch/Projects/m1n1/`):
 ```bash
-# On macOS, in /Users/rusch/Projects/m1n1/:
-make ARCH=aarch64-linux-gnu- RELEASE=1
-# Then re-install the boot object (macOS 26 / iBoot 13822.81.10 confirmed flags):
-kmutil configure-boot -c build/m1n1.bin \
-    --raw --entry-point 2048 --lowest-virtual-address 0 \
-    -v /Volumes/<stub>
+make -j$(sysctl -n hw.logicalcpu)
+# Toolchain: /opt/homebrew/Cellar/llvm/22.1.1/bin/ + /opt/homebrew/opt/lld/bin/
 ```
+
+Reinstall command (run from 1TR Terminal — see USB_DEBUG.md Boot Setup State):
+```bash
+sh /Volumes/Data/Users/rusch/Projects/asahi_neo/scripts/reinstall_m1n1.sh
+```
+
+Patches applied on top of AsahiLinux/m1n1 (all in fork):
+- `usb.c`: t8140 un-indexed ADT node fallbacks (dart-usb, usb-drd, mapper-usb)
+- `pmgr.c`: pmgr1 mode (psreg_idx → reg[] direct, no ps-regs table)
+- `usb.c`: ATC0_USB direct enable via pmgr_power_on(), bypassing stuck AON parent
+- `kboot_atc.c`: atc-phy,t8130 added to fuse table

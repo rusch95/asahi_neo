@@ -1,6 +1,6 @@
 # PLAN.md — Action Items
 
-Last updated: 2026-03-14
+Last updated: 2026-03-15
 
 ## CRITICAL FINDING (2026-03-14)
 
@@ -80,6 +80,31 @@ kernelcache regardless of OS type? Must verify empirically.
 ### 0.3 m1n1 / Toolchain Setup
 - [x] Build m1n1 from source targeting M4 (closest available proxy for A18 Pro)
       → build/m1n1.bin and build/m1n1.macho at /Users/rusch/Projects/m1n1/build/
+- [x] Diagnosed USB not enumerating — ROOT CAUSE FOUND 2026-03-15
+      t8140 ADT uses un-indexed node names (`usb-drd`, `dart-usb`, `mapper-usb`)
+      while m1n1 uses indexed format strings (`usb-drd%u` → `usb-drd0`).
+      `usb_drd_get_regs()` fails at first ADT lookup, USB PHY never powered.
+      See docs/USB_DEBUG.md for full analysis and fix options.
+      Secondary: `atc-phy0` reports compatible `atc-phy,t8130` — not in kboot_atc.c
+      fuse table. Affects Linux boot USB3/TB only, not m1n1 proxyclient.
+- [x] Patched m1n1 src/usb.c — fallback to un-indexed ADT node names (`usb-drd`,
+      `dart-usb`, `mapper-usb`) when indexed lookup fails at idx==0. 2026-03-15
+- [x] Patched m1n1 src/kboot_atc.c — added `atc-phy,t8130` (no fuses) to fuse table.
+- [x] Rebuilt m1n1 — build/m1n1.bin @ 2026-03-15 09:19, 1.0MB (USB node name fix)
+- [x] First boot: dart found ✓, but pmgr_init() failed — t8140 uses `pmgr1,t8140`
+      which has no `ps-regs` property. USB PHY never powered. 2026-03-15
+- [x] Patched pmgr.c — pmgr1 mode: psreg_idx indexes reg[] directly, no ps-regs table.
+- [x] Rebuilt m1n1 — build/m1n1.bin @ 2026-03-15 (pmgr1 + USB node fix)
+- [x] Second root cause found 2026-03-15: ATC0_USB_AON pmgr register times out because
+      it requires SPMI HPM interaction that m1n1 does not issue. pmgr_set_mode_recursive()
+      aborts on parent failure, so ATC0_USB (DWC3 clock gate) is never enabled.
+      Confirmed via live boot: GSNPSID reads 0x00000000 at drd=0x40a280000.
+      Fix: call pmgr_power_on(0, "ATC0_USB") directly after standard pmgr calls —
+      bypasses parent recursion, writes ATC0_USB psreg immediately. iBoot already
+      powered AON; only DWC3 clock gate needed toggling. See docs/USB_DEBUG.md.
+- [x] Rebuilt m1n1 — build/m1n1.bin @ 2026-03-15 18:54 (commit 30caac3)
+- [ ] **NEXT: Reinstall m1n1 from 1TR and reboot** (see reinstall steps below)
+      Then verify `/dev/ttyACM*` appears on Linux host.
 - [ ] Confirm tethered boot works over USB-C UART on target hardware
 - [x] Set up ARM64 cross-compilation toolchain (clang + lld) — brew llvm + lld installed
 - [ ] Set up Python proxyclient environment for m1n1 scripting
