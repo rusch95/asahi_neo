@@ -113,14 +113,8 @@ fi
 
 # --- Install m1n1 -----------------------------------------------------------
 
-# When permissive security is already set kmutil skips the "Are you sure?" prompt
-# and goes straight to Username. When it was just set, kmutil asks for confirmation.
 install_m1n1() {
-    if [ "$ALREADY_PERMISSIVE" = true ]; then
-        printf '%s\n%s\n' "$ADMIN_USER" "$ADMIN_PASS"
-    else
-        printf 'y\n%s\n%s\n' "$ADMIN_USER" "$ADMIN_PASS"
-    fi | kmutil configure-boot \
+    printf 'y\n%s\n%s\n' "$ADMIN_USER" "$ADMIN_PASS" | kmutil configure-boot \
         -c "$M1N1_BIN" \
         --raw \
         --entry-point 2048 \
