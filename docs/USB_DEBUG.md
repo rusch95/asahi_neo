@@ -183,3 +183,67 @@ dmesg | grep -i "acm\|apple"   # should show cdc_acm binding
 
 If still nothing: check `dmesg | grep usb` for connection events — even failed
 ones show up as port resets, which would at least confirm physical USB connectivity.
+
+---
+
+## Second Root Cause — ATC0_USB_AON Blocks DWC3 Clock Gate (2026-03-15)
+
+**Status: fix applied, pending boot test**
+
+After adding t8140 un-indexed path fallbacks (dart-usb, usb-drd), USB init finds all
+the right nodes and registers but DWC3 still does not respond:
+
+```
+usb: using un-indexed dart path (t8140 compat)
+usb: dart0 init: path=/arm-io/dart-usb idx=1
+dart: dart /arm-io/dart-usb at 0x40af80000 is a t8110
+usb: using un-indexed drd path (t8140 compat)
+usb: drd regs ok: drd=0x40a280000 unk3=0x40aa84000 atc=0x40aa90000
+no DWC3 core found at 0x40a280000: 00000000      ← GSNPSID reads zero
+```
+
+### Root Cause
+
+`pmgr_set_mode_recursive()` enables a device's parents before enabling the device
+itself (lines 229–238 of pmgr.c). When enabling `ATC0_USB` (the DWC3 clock gate),
+it first recurses to enable parent `ATC0_USB_AON`. On t8140, `ATC0_USB_AON` requires
+an SPMI HPM command before its pmgr register will accept a mode change — m1n1 does
+not issue that command, so the register times out. The recursive call returns -1 and
+the abort path (`return ret`) exits **before `ATC0_USB` is ever touched**.
+
+Confirmed sequence:
+```
+pmgr: [0x300700000] before=0x00000100 actual=0 target=0 -> setting mode f
+pmgr: timeout while trying to set mode f for device at 0x300700000: 100
+```
+`ATC0_USB_AON` psreg stays stuck; DWC3 clock gate `ATC0_USB` never enabled;
+read from `0x40a280000 + 0xc120` (GSNPSID) returns 0x00000000.
+
+### Fix Applied
+
+`pmgr_power_on(int die, const char *name)` looks up a device by name and calls
+`pmgr_set_mode(addr, PMGR_PS_ACTIVE)` directly — **no parent recursion**. Added to
+`usb_phy_bringup()` for `idx == 0` after the standard (failing) pmgr calls:
+
+```c
+// On t8140, ATC0_USB_AON requires SPMI — recursive enable aborts before
+// ATC0_USB (DWC3 clock gate) is enabled. Enable it directly.
+if (idx == 0) {
+    if (pmgr_power_on(0, "ATC0_USB") < 0)
+        printf("usb: direct ATC0_USB enable failed\n");
+    else
+        printf("usb: ATC0_USB direct enable ok\n");
+}
+```
+
+This works because iBoot already powered the AON domain as part of DFU/USB bringup.
+The hardware is already up; only the DWC3 clock gate needed to be toggled.
+
+### ATC0_USB_AON — Why It Stays Stuck
+
+`ATC0_USB_AON` is an always-on power island controlled jointly by pmgr and the SPMI
+HPM (nub-spmi-a0). On earlier chips (M1/M2), no HPM is involved and pmgr alone can
+transition the AON domain. On t8140 (A18 Pro), the HPM must assert USB power before
+the pmgr register reflects the change. m1n1 has no SPMI HPM driver. The correct
+long-term fix is an SPMI HPM driver, but bypassing the stuck parent unblocks USB2
+proxyclient operation without it.
