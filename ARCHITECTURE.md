@@ -105,20 +105,25 @@ See docs/SPTM_FINDINGS.md for full ABI details.
 ## Memory Layout at Shim Intercept
 
 ```
-Physical address space (approximate, to be verified via ADT dump):
+Physical address space (A18 Pro MacBook Neo, from live ADT dump 2026-03-14):
 
-0x0_0000_0000  — I/O / peripheral registers (ARM topology)
-0x0_8000_0000  — DRAM start (typical on A18 Pro; verify)
+0x0_0000_0000        — I/O / peripheral registers
+  0x3_0100_0000      — AIC interrupt controller (size 0x1CC000)
+  0x3_8521_0000      — uart4 / wlan-debug UART (earlycon target)
+  0x3_8521_4000      — uart5 / bt-debug UART
+
+0x100_0000_0000      — DRAM start ✓ CONFIRMED via m1n1 boot 2026-03-14
   [iBoot data]
   [XNU kernelcache + shim]  ← we are here at intercept
-  [SPTM region]             ← mapped and owned by SPTM, do not touch
+  [SPTM region]             ← mapped and owned by SPTM/PPL, do not touch
   [Linux kernel image]      ← loaded here by shim
   [Linux initramfs]
-  [Device tree blob]
-0x2_0000_0000  — DRAM end (estimate; actual size from ADT memory node)
+  [Device tree blob]        ← stub_a18pro.dtb (1.9 KB)
+0x101_e6e2_8000      — Top of normal RAM (confirmed: ~120 GB from base = 16 GB device)
 ```
 
-Exact addresses must be extracted from a live ADT dump via m1n1 proxyclient.
+> **DRAM base 0x10000000000 confirmed** by m1n1 first boot (2026-03-14).
+> m1n1 reported: `MMU: RAM base: 0x10000000000`, `MMU: Top of normal RAM: 0x101e6e28000`.
 
 ---
 
@@ -173,7 +178,10 @@ Reference: AsahiLinux/linux arch/arm64/boot/dts/apple/ for M4 DT as a template.
 
 1. Can SPTM accept a "handoff" to a non-XNU kernel, or does it enforce XNU identity?
 2. What is the minimum SPTM call sequence XNU must complete before we can intercept?
-3. Does SPTM have a watchdog that kills EL1 if certain heartbeat calls stop?
+3. ~~Does SPTM have a watchdog that kills EL1 if certain heartbeat calls stop?~~
+   **ANSWERED:** No watchdog. SPTM is purely reactive (called by EL1, never polls).
+   Linux will not be killed by SPTM simply for not calling it. Confirmed: no periodic
+   SPTM call obligation found in XNU or Steffin/Classen paper. See SPTM_FINDINGS.md.
 4. ~~Are GXF `genter`/`gexit` encodings the same on A18 Pro as M4?~~
    **ANSWERED:** Yes. `genter=0x00201420`, `gexit=0x00201400` — confirmed from m1n1
    source (`gxf_asm.S`) and Sven Peter's public reverse-engineering. Encodings are

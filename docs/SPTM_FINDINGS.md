@@ -15,11 +15,18 @@ SPTM (Secure Page Table Monitor) is Apple's firmware component introduced with *
 enforcement (SPRR registers). SPTM is the sole authority on physical memory frame typing
 and all page table mutations.
 
-| Generation | Chip | Mechanism |
-|-----------|------|-----------|
-| A12–A14, M1 | iPhone XS – iPhone 13, M1 Mac | PPL (embedded in XNU kernelcache) |
-| A15, M2+ | iPhone 13 Pro+ / M2 Mac+ | SPTM (separate iBoot-loaded firmware) |
-| A17, A18, M3, M4 | Current | SPTM (confirmed; paper targets A18 Pro t8140 + M4) |
+| Generation | Chip | macOS mechanism | iOS mechanism |
+|-----------|------|-----------------|---------------|
+| A12–A14, M1 | iPhone XS – iPhone 13, M1 Mac | PPL (in kernelcache) | PPL |
+| A15, M2+ | iPhone 13 Pro+ / M2 Mac+ | SPTM | SPTM |
+| A17, A18 Pro, M3, M4 | Current iPhones / Macs | **macOS: PPL** (confirmed A18 Pro t8140) | SPTM |
+
+> **Key finding (2026-03-14):** macOS 26 on A18 Pro (t8140) uses **PPL**, not SPTM.
+> Zero `genter` instructions in the 121 MB ARM64 kernelcache. SPTM blobs ARE present
+> on the SSD (extracted: `sptm.t8140.bin`) but iBoot does not load them for macOS.
+> iBoot activates SPTM only for iOS-style kernelcaches. This means **Path A
+> (boot macOS-style kernelcache) does NOT require SPTM interaction.** It follows
+> the same PPL path as M1/M2/M3 Asahi Linux.
 
 **Primary reference:** Steffin & Classen — "Modern iOS Security Features: A Deep Dive
 into SPTM, TXM, and Exclaves", arXiv:2510.09272 (Oct 2025).

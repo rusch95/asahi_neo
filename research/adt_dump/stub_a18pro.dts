@@ -10,13 +10,24 @@
  *   AIC:   0x000301000000 (size 0x001cc000)
  *   uart4: 0x000385210000 (size 0x00004000) — wlan-debug UART
  *
- * TODO before use:
- *   - Verify DRAM base address (empirically via m1n1)
- *   - Add interrupt numbers for UART (uart4 IRQ = 0x448 from ADT)
- *   - Add clock nodes (samsung,uart requires clock)
- *   - Add timer node (ARM generic timer)
- *   - Add CPU power domains
- *   - Reference Asahi Linux apple-m4 DTS for missing nodes
+ * Verified driver details (from Asahi Linux asahi branch):
+ *   UART compat: "apple,s5l-uart" (driver: drivers/tty/serial/samsung_tty.c)
+ *   earlycon: "earlycon=s3c2410,mmio32,0x385210000"
+ *   Clock: 24 MHz fixed oscillator, names "uart" + "clk_uart_baud0"
+ *   AIC #interrupt-cells: 4 — format: <type num flags irq_type>
+ *   uart4 IRQ from ADT: 0x448 (1096 decimal)
+ *
+ * Confirmed via m1n1 first boot (2026-03-14):
+ *   - DRAM base: 0x10000000000 ✓
+ *   - AIC v3 @ 0x301000000 ✓
+ *   - DT compatible: "apple,j700" (not "apple,j700ap")
+ *   - Running in EL2 ✓
+ *
+ * TODO:
+ *   - Verify AIC v3 interrupt specifier format for uart4 IRQ 0x448
+ *   - Add ARM generic timer interrupts
+ *   - Add CPU power domains / enable-method (Apple uses custom WFE)
+ *   - Investigate MCC (mcc,t8140 unsupported) and pmgr ps-regs
  */
 
 /dts-v1/;
@@ -24,7 +35,7 @@
 / {
 	#address-cells = <2>;
 	#size-cells = <2>;
-	compatible = "apple,mac17,5", "apple,t8140";
+	compatible = "apple,j700", "apple,t8140";
 
 	memory@10000000000 {
 		device_type = "memory";
@@ -33,8 +44,20 @@
 		       0x00000002 0x00000000>;
 	};
 
+	/*
+	 * 24 MHz fixed oscillator — UART clock source.
+	 * All Apple Silicon UARTs run from the 24 MHz refclk.
+	 */
+	clk24: clock-24m {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <24000000>;
+		clock-output-names = "clk24";
+	};
+
 	chosen {
-		/* bootargs set by shim — e.g. "earlycon=s3c2410,mmio32,0x385210000 console=ttyS0,115200" */
+		/* earlycon uses s3c2410 driver (matches apple,s5l-uart) */
+		/* earlycon is DT-driven via OF_EARLYCON_DECLARE — no address in cmdline */
 		bootargs = "earlycon console=ttyS0,115200 loglevel=8";
 		stdout-path = &uart4_node;
 	};
@@ -117,15 +140,20 @@
 			       0x00000000 0x001cc000>;
 		};
 
-		/* UART4 (wlan-debug) — Samsung compatible 8250-derivative */
+		/* UART4 (wlan-debug) — Apple s5l UART (Samsung-derived) */
 		uart4_node: serial@385210000 {
-			compatible = "apple,s5l-uart";  /* TODO: verify — might need samsung,s3c2410-uart */
+			compatible = "apple,s5l-uart";
 			reg = <0x00000003 0x85210000
-			       0x00000000 0x00004000>;
+			       0x00000000 0x00001000>;  /* 4KB; ADT maps 0x4000 but driver needs 0x1000 */
+			reg-io-width = <4>;
 			interrupt-parent = <&aic>;
-			/* uart4 interrupt from ADT: 0x448 = 1096 decimal */
-			interrupts = </* TODO: AIC v3 specifier for IRQ 0x448 */>;
-			clocks = </* TODO: uart clock reference */>;
+			/*
+			 * uart4 IRQ from ADT: 0x448 = 1096 decimal
+			 * AIC v3 specifier: <AIC_IRQ 0 1096 IRQ_TYPE_LEVEL_HIGH>
+			 * TODO: verify — AIC_IRQ=0, die=0, irq=1096, flags=4
+			 */
+			interrupts = <0 0 1096 4>;
+			clocks = <&clk24>, <&clk24>;
 			clock-names = "uart", "clk_uart_baud0";
 			status = "okay";
 		};

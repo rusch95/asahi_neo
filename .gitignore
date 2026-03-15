@@ -6,9 +6,6 @@ research/firmware/*.macho
 # Extracted kernel collections
 research/firmware/kernelcache*.bin
 
-# ADT raw dump output (re-generate with scripts/dump_adt.py --ioreg)
-research/adt_dump/
-
 # Build artifacts
 xnu_shim/build/
 *.o

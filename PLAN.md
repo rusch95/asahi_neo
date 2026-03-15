@@ -78,9 +78,10 @@ kernelcache regardless of OS type? Must verify empirically.
 - [ ] Resolve UART compatible string: "apple,s5l-uart" vs "samsung,s3c2410-uart" for Linux driver
 
 ### 0.3 m1n1 / Toolchain Setup
-- [ ] Build m1n1 from source targeting M4 (closest available proxy for A18 Pro)
+- [x] Build m1n1 from source targeting M4 (closest available proxy for A18 Pro)
+      → build/m1n1.bin and build/m1n1.macho at /Users/rusch/Projects/m1n1/build/
 - [ ] Confirm tethered boot works over USB-C UART on target hardware
-- [ ] Set up ARM64 cross-compilation toolchain (clang + lld)
+- [x] Set up ARM64 cross-compilation toolchain (clang + lld) — brew llvm + lld installed
 - [ ] Set up Python proxyclient environment for m1n1 scripting
 - [ ] Implement scripts/probe_sptm.py using m1n1's existing gl2_call() / gxf hooks
       (m1n1 has native GXF support in src/gxf.c — we can set GXF_ENTER_EL1 to our
@@ -88,8 +89,13 @@ kernelcache regardless of OS type? Must verify empirically.
 - [ ] Install ipsw CLI tool (https://github.com/blacktop/ipsw) for IPSW extraction
 
 ### 0.4 Linux Kernel Baseline
-- [ ] Identify which AsahiLinux/linux branch has the most M4 progress
-- [ ] Build a minimal ARM64 kernel with CONFIG_APPLE_MACHINE, no AGX, serial console only
+- [x] Identify which AsahiLinux/linux branch has the most M4 progress
+      → AsahiLinux/linux `asahi` branch (March 2026); no M4/t8132 DTS yet
+- [x] Build a minimal ARM64 kernel with CONFIG_APPLE_MACHINE, no AGX, serial console only
+      → arch/arm64/boot/Image (7.0 MB, 16K pages) at /Users/rusch/Projects/linux-asahi/
+      → macOS build required shims: .host_include/{elf.h,byteswap.h,gethostuuid.h,sys/_types/_uuid_t.h},
+        .build_tools/sed → gsed, per-file HOSTCFLAGS_file2alias.o += -D_UUID_T in scripts/mod/Makefile
+      → Build cmd: PATH=".build_tools:llvm/bin:bison/bin:$PATH" gmake ARCH=arm64 LLVM=1 HOSTCFLAGS="-I.host_include" Image
 - [ ] Confirm it boots under m1n1 hypervisor on M4 hardware (as a sanity check)
 
 ---
