@@ -61,27 +61,29 @@ to create the stub without relying on the installer's chip checks.
 
 1. Boot into 1TR: hold power button → "Loading startup options" → Options
 2. Open Terminal from Utilities menu
-3. Identify the stub volume: `diskutil list`
-4. `csrutil disable --volume /Volumes/<stub>` — disables SIP for that container only
-5. `bputil -a --volume /Volumes/<stub>` — sets BootPolicy to Permissive
-6. Reboot into macOS normally
+3. Identify the stub volume: `diskutil list` / `diskutil apfs list`
+4. Mount Macintosh HD if needed: `diskutil mount /dev/diskXsY` (System + Data volumes)
+5. `csrutil disable` — authenticate as a user on the stub volume when prompted
+6. `bputil -nkcas` — authenticate as a user on the stub volume when prompted
+   (`-n` permissive, `-k` allow kexts, `-c` disable CTRR, `-a` allow any boot object, `-s` disable SSV)
+7. Reboot into macOS normally
 
 ### Step 4 — Install m1n1 as the boot object
 
 ```bash
-# From macOS (not recoveryOS), with the stub volume mounted:
-kmutil configure-boot -v /Volumes/<stub> \
-    --custom-boot-object /path/to/m1n1.bin \
-    --raw-payload
+# From macOS (not recoveryOS), with Macintosh HD mounted:
+# Confirmed working on macOS 26 / iBoot 13822.81.10
+kmutil configure-boot -c /Users/rusch/Projects/m1n1/build/m1n1.bin \
+    --raw --entry-point 2048 --lowest-virtual-address 0 \
+    -v /Volumes/<stub>
 ```
 
 This replaces the kernelcache slot with m1n1. On next boot selecting that volume,
 iBoot loads m1n1 directly. m1n1 waits ~5 s for a USB proxyclient connection.
 
-> **⚠️ Caveats for A18 Pro (macOS 26):** The exact `kmutil` flags may differ.
-> Verify the command against the Asahi installer source for your iBoot version
-> (13822.81.10). If `--raw-payload` is rejected, try without it; m1n1.macho may
-> be needed instead of m1n1.bin for signed payload paths.
+> **Note:** `--raw-payload` and `--custom-boot-object` are the old flag names and
+> fail on macOS 12.1+. Use `-c`, `--raw`, `--entry-point 2048`,
+> `--lowest-virtual-address 0` as above. `m1n1.macho` is not needed.
 
 ### Step 5 — Tethered boot via proxyclient
 

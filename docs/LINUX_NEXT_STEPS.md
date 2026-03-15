@@ -235,5 +235,8 @@ If you do rebuild, the macOS build command is:
 ```bash
 # On macOS, in /Users/rusch/Projects/m1n1/:
 make ARCH=aarch64-linux-gnu- RELEASE=1
-# Then re-run kmutil configure-boot to update the installed boot object
+# Then re-install the boot object (macOS 26 / iBoot 13822.81.10 confirmed flags):
+kmutil configure-boot -c build/m1n1.bin \
+    --raw --entry-point 2048 --lowest-virtual-address 0 \
+    -v /Volumes/<stub>
 ```
