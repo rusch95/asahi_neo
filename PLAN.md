@@ -110,10 +110,35 @@ kernelcache regardless of OS type? Must verify empirically.
       (Dialog PMU power domain region 0) to screen for analysis.
       Dialog PMU power rail registers confirmed at SPMI 0x6000-0x6FFF (16 ptmu-regions).
 - [x] Rebuilt m1n1 — build/m1n1.bin @ 2026-03-15 (commit c0c7338)
-- [ ] **NEXT: Reinstall m1n1 from 1TR and reboot** (see reinstall steps below)
-      Then verify `/dev/ttyACM*` appears on Linux host.
-      If "direct ATC0_USB enable failed" still shows: read the 0x6000 register dump
-      from screen or `dd` and find which bit controls ATC0_USB_AON.
+- [x] Reverse-engineered AppleDialogSPMIPMU kext from mac17g kernelcache (2026-03-15)
+      Complete Dialog baku PMU register map documented in src/baku_pmu.h:
+        BAKU_PM_SETTING=0xF801, BAKU_LEG_SCRPAD=0xF700, BAKU_SCRPAD_BASE=0x8000
+        BAKU_LPM_CTRL_BASE=0x8FDC (SLPSMC is ENABLED on mac17g)
+        BAKU_PTMU_BASE=0x6000 (16 regions 0x6000-0x6FFF — PMU fw managed)
+      Key finding: ATC0_USB_AON power control is inside 0x6000-0x6FFF, managed by
+      PMU firmware. OS cannot directly write these regs; firmware unlocks them after
+      its own init. iBoot runs PMU fw before handoff, so SPMI WAKEUP should be enough.
+      usb_spmi_init() now probes 0xF801, 0xF700, 0x8FDC, and 0x6000 to diagnose
+      which stage the PMU is at when m1n1 runs.
+- [x] Rebuilt m1n1 — build/m1n1.bin @ 2026-03-15 (baku_pmu.h + diagnostic probes)
+- [x] SPMI diagnostic: all reads fail (EXT_READ + EXT_READL), both before and after WAKEUP.
+      WAKEUP appeared to ACK but was synthetic — bus clock was gated.
+      SPMI ctrl STATUS = 0x01000100 (RX_EMPTY|TX_EMPTY = idle, MMIO accessible via AXI
+      fabric even when clock-gated). Controller base confirmed at 0x308714000 from ADT.
+- [x] Root cause found: AppleARMSPMIController::start() calls enablePsdService()
+      (= pmgr power domain enable) before using the bus. m1n1's spmi_init() skips this.
+      Found via kernelcache RE of AppleARMSPMI.cpp: panic string
+      "Unable to enablePsdService, result=%08x" proves it's mandatory.
+      Also found: pmu-spmi-delay and pmu-spmi-retry ADT props for inter-command timing.
+- [x] Fix applied: pmgr_adt_power_enable(BAKU_SPMI_NODE) before spmi_init() in usb.c.
+      Docs updated in docs/USB_DEBUG.md (Fourth Root Cause section).
+- [ ] **NEXT: Flash and boot — check for:**
+        "spmi0 +00: ..." MMIO dump line — confirm STATUS is same (0x01000100)
+        "PMU EXT_READ reg00=XX ok" — SPMI reads now working
+        "PMU 0xf801(pm_setting)=XX" → PMU alive
+        "PMU 0x6000(ptmu[0]) ok@Xms" → PMU firmware accessible
+        Absence of pmgr ATC0_USB_AON timeout → USB rail enabled by PMU
+        "USB0 registered" → tethered boot working
 - [ ] Confirm tethered boot works over USB-C UART on target hardware
 - [x] Set up ARM64 cross-compilation toolchain (clang + lld) — brew llvm + lld installed
 - [ ] Set up Python proxyclient environment for m1n1 scripting

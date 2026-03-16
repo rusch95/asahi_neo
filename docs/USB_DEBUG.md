@@ -1,6 +1,6 @@
 # USB Serial Debug — m1n1 Proxy Not Enumerating
 
-**Status as of 2026-03-15 — ROOT CAUSE FOUND**
+**Status as of 2026-03-15 — Fourth root cause found; fix pending boot test**
 
 m1n1 boots and shows its boot screen on the MacBook Neo display, but does not
 enumerate as a USB ACM device on the Linux host. No `/dev/ttyACM*` appears, and
@@ -289,3 +289,76 @@ transition the AON domain. On t8140 (A18 Pro), the HPM must assert USB power bef
 the pmgr register reflects the change. m1n1 has no SPMI HPM driver. The correct
 long-term fix is an SPMI HPM driver, but bypassing the stuck parent unblocks USB2
 proxyclient operation without it.
+
+---
+
+## Fourth Root Cause — SPMI Controller Not pmgr-Enabled (2026-03-15)
+
+**Status: fix applied in current build; pending boot test**
+
+### All SPMI Reads Were Always Failing
+
+Despite the Third Root Cause fix (correct SPMI bus and address), every SPMI register
+read — including the mandatory SPMI device-ID register 0x00 and `pm_setting` (0xF801)
+— continued to fail. Symptoms:
+
+- `WAKEUP` to addr=0xE ACKed (bus-level response)
+- All `EXT_READ` (8-bit addr) and `EXT_READL` (16-bit addr) returned fast NAK
+- SPMI controller STATUS register = `0x01000100` = RX_EMPTY | TX_EMPTY (idle, correct)
+- MMIO offsets 0x00–0x3C: only STATUS/CMD/REPLY at 0x00–0x08; rest zero
+- Waiting 200ms post-WAKEUP made no difference
+- The WAKEUP ACK was likely **synthetic** — the unclocked controller generating a
+  canned reply, not a real response from the Dialog PMU on the wire
+
+### Root Cause: SPMI Bus Controller Requires pmgr Power-On
+
+Kernelcache RE of `AppleARMSPMI.cpp` (`AppleARMSPMIController`) found:
+
+```
+result == 0
+Unable to enablePsdService, result=%08x
+Panicing from IOKit spmi command
+```
+
+`enablePsdService()` is `AppleARMIO`'s pmgr power domain enable — equivalent to
+`pmgr_adt_power_enable()` in m1n1. `AppleARMSPMIController::start()` calls this
+before issuing any commands, and panics on failure. m1n1's `spmi_init()` only maps
+the MMIO but never enables the controller via pmgr, so the SPMI bus clock was gated.
+The controller appeared healthy (MMIO reads worked through the AXI fabric) but no
+commands reached the SPMI wire.
+
+### Additional Kernelcache Findings
+
+From `AppleDialogSPMIPMU.cpp` string table, the PMU driver reads these ADT properties
+from `pmu-main@E` at startup:
+
+| ADT property | Purpose |
+|---|---|
+| `pmu-spmi-retry` | SPMI command retry count |
+| `pmu-spmi-delay` | Mandatory inter-command delay (us) |
+| `pmu-bringup` | Bringup mode flag |
+| `pmu-debug` | Debug logging |
+| `info-id` | PMU hardware ID |
+
+The `pmu-spmi-delay` property means macOS applies a fixed delay between SPMI
+transactions that m1n1 does not — relevant if reads start working after the pmgr
+fix but produce intermittent errors.
+
+### Fix
+
+```c
+// Must pmgr-enable the SPMI bus controller before any spmi_init() call.
+// AppleARMSPMIController::start() calls enablePsdService() (= pmgr power domain
+// enable) before using the bus; without it the clock is gated and all commands fail.
+if (pmgr_adt_power_enable(BAKU_SPMI_NODE) < 0)
+    printf("usb: pmgr enable %s failed (may be ok if already on)\n", BAKU_SPMI_NODE);
+spmi_dev_t *pmu_spmi = spmi_init(BAKU_SPMI_NODE);
+```
+
+### Expected Outcome
+
+If `pmgr_adt_power_enable("/arm-io/nub-spmi0")` succeeds, the SPMI bus clock is
+ungated and EXT_READ of reg 0x00 should return the Dialog PMU's SPMI device ID.
+Subsequent reads of `pm_setting` (0xF801), `leg_scrpad` (0xF700), and `ptmu[0]`
+(0x6000) should also succeed, and the pmgr ATC0_USB_AON timeout may resolve as the
+PMU firmware signals power-good for the USB rail.
