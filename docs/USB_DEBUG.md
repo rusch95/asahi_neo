@@ -186,6 +186,48 @@ ones show up as port resets, which would at least confirm physical USB connectiv
 
 ---
 
+## Third Root Cause — SPMI Wakeup Targeting Wrong Bus (2026-03-15)
+
+**Status: fixed in commit c0c7338, pending boot test**
+
+The previous build sent `spmi_send_wakeup()` to **hpm0 (addr=0xC)** on **nub-spmi-a0**
+(the USB HPM bus, physical addr 0xF8908000). This is the TI SN2012xx USB-C controller —
+it does NOT control ATC0_USB_AON. The HPM was already in "APP" mode at boot and the
+wakeup had no effect on the stuck pmgr register.
+
+**Root cause of the wrong target**: The comment in usb_spmi_init() said "HPM" but the
+device that controls power rails (including ATC0_USB_AON) is the Dialog Semiconductor
+"baku" PMU (compatible "pmu,spmi","pmu,baku") at **addr=0xE on nub-spmi0@F8714000**.
+That's the system PMU bus — a completely separate SPMI controller.
+
+**Fix in c0c7338**: Send WAKEUP to pmu-main (addr=0xE) on nub-spmi0. Also read 16 bytes
+at SPMI reg 0x6000 (first ptmu-region) to see power domain control register state.
+
+**Dialog PMU "baku" register map** (from pmu-main@E ADT ptmu-region properties):
+
+| Region | SPMI addr range | Size |
+|--------|-----------------|------|
+| 0–7    | 0x6000–0x61FF   | 8×64 bytes (power domain controls?) |
+| 8–11   | 0x6200–0x63FF   | 4×128 bytes |
+| 12–13  | 0x6400–0x67FF   | 2×512 bytes |
+| 14–15  | 0x6800–0x6FFF   | 2×1024 bytes |
+
+ATC0_USB_AON enable bit is likely in 0x6000–0x61FF. The 0x6000 register dump printed
+by the new build will tell us which region controls USB power.
+
+Additional PMU properties found in pmu-main@E ioreg:
+- `info-leg_scrpad = <00f70000>` → SPMI reg 0xf700 is the panic counter register
+- `function-external_standby = <890000005779656b4553424d>` → routed via smc-pmu
+  (phandle 0x89), not direct SPMI — macOS-only deep sleep interaction
+- `info-pm_setting = <01f80000>` → SPMI reg 0xf801 for PM settings
+
+**How to read the NVMe log after this boot** (same as before):
+```sh
+sudo dd if=/dev/disk0 bs=4096 skip=8 count=1 | strings
+```
+
+---
+
 ## Second Root Cause — ATC0_USB_AON Blocks DWC3 Clock Gate (2026-03-15)
 
 **Status: fix applied, pending boot test**

@@ -103,8 +103,17 @@ kernelcache regardless of OS type? Must verify empirically.
       bypasses parent recursion, writes ATC0_USB psreg immediately. iBoot already
       powered AON; only DWC3 clock gate needed toggling. See docs/USB_DEBUG.md.
 - [x] Rebuilt m1n1 — build/m1n1.bin @ 2026-03-15 18:54 (commit 30caac3)
+- [x] Third root cause found 2026-03-15: SPMI wakeup was targeting the wrong bus.
+      Sent WAKEUP to hpm0/addr=0xC on nub-spmi-a0 (USB HPM = TI SN2012xx, USB-C ctrl).
+      ATC0_USB_AON is controlled by the Dialog PMU "baku" at addr=0xE on nub-spmi0.
+      Fixed in commit c0c7338: targets nub-spmi0/0xE. Also dumps SPMI 0x6000-0x600F
+      (Dialog PMU power domain region 0) to screen for analysis.
+      Dialog PMU power rail registers confirmed at SPMI 0x6000-0x6FFF (16 ptmu-regions).
+- [x] Rebuilt m1n1 — build/m1n1.bin @ 2026-03-15 (commit c0c7338)
 - [ ] **NEXT: Reinstall m1n1 from 1TR and reboot** (see reinstall steps below)
       Then verify `/dev/ttyACM*` appears on Linux host.
+      If "direct ATC0_USB enable failed" still shows: read the 0x6000 register dump
+      from screen or `dd` and find which bit controls ATC0_USB_AON.
 - [ ] Confirm tethered boot works over USB-C UART on target hardware
 - [x] Set up ARM64 cross-compilation toolchain (clang + lld) — brew llvm + lld installed
 - [ ] Set up Python proxyclient environment for m1n1 scripting
