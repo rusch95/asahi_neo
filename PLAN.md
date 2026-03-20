@@ -1,6 +1,6 @@
 # PLAN.md — Action Items
 
-Last updated: 2026-03-15
+Last updated: 2026-03-17
 
 ## CRITICAL FINDING (2026-03-14)
 
@@ -132,13 +132,101 @@ kernelcache regardless of OS type? Must verify empirically.
       Also found: pmu-spmi-delay and pmu-spmi-retry ADT props for inter-command timing.
 - [x] Fix applied: pmgr_adt_power_enable(BAKU_SPMI_NODE) before spmi_init() in usb.c.
       Docs updated in docs/USB_DEBUG.md (Fourth Root Cause section).
-- [ ] **NEXT: Flash and boot — check for:**
-        "spmi0 +00: ..." MMIO dump line — confirm STATUS is same (0x01000100)
-        "PMU EXT_READ reg00=XX ok" — SPMI reads now working
-        "PMU 0xf801(pm_setting)=XX" → PMU alive
-        "PMU 0x6000(ptmu[0]) ok@Xms" → PMU firmware accessible
-        Absence of pmgr ATC0_USB_AON timeout → USB rail enabled by PMU
-        "USB0 registered" → tethered boot working
+- [x] Fourth Root Cause hypothesis WRONG — confirmed via live boot 2026-03-16:
+      All pmgr domain names ("SPMI", "SPMI0", "NUB_SPMI") return -1 on t8140.
+      No named pmgr domain for nub-spmi0; iBoot leaves it powered. pmgr_adt_power_enable
+      silently failed; SPMI reads still returned ret=-2.
+- [x] Identified ret=-2 = SPMI_ERR_BUS_IO (not timeout) — PMU actively NACKing,
+      meaning bus and controller are fully functional. PMU received the command.
+- [x] Ruled out exclave protection 2026-03-16: nub-spmi0 has no exclave-edk-service
+      or xspmi props. Only nub-spmi1 (XSPMIQueue_EDK) is exclave-controlled.
+      Direct AP MMIO writes to nub-spmi0 FIFO are legal.
+- [x] Confirmed three MMIO regions on nub-spmi0 from ADT reg[]:
+      reg[0]=0x308714000 STATUS=0x01000100 (FIFO — used by m1n1 spmi driver)
+      reg[1]=0x308704000 STATUS=0x01000000
+      reg[2]=0x308700000 STATUS=0x00000004
+- [x] Fifth root cause found 2026-03-16: Dialog PMU in "external standby" mode post-iBoot.
+      PMU firmware ACKs management cmds (WAKEUP/RESET) but NACKs all register reads.
+      macOS exits this via function-external_standby → smc-pmu (phandle 0x89,
+      AppleSMCInterface) → SMC key write to AOP/SMC firmware.
+      Specifier decoded: "Wyek" (0x5779656b) + "ESBM" (0x4553424d).
+      Two key hypotheses: key="ESBM"/value=0or1, or key="Wyek"/value=0x4553424d.
+- [x] Applied fix in commit 944adbd: smc_init() + smc_write_u32() testing both hypotheses
+      before SPMI reads. m1n1's SMC driver (src/smc.c) is existing, working infrastructure.
+- [x] Booted 944adbd 2026-03-16: SMC init OK (/arm-io/smc valid on t8140).
+      All smc_write_u32() calls returned 0x84 = key not found.
+      "ESBM" and "Wyek" are NOT raw SMC key names — they are callPlatformFunction args
+      dispatched inside AppleSMCPMU, not literal keys sent over the RTKit mailbox.
+- [x] ADT search for phandle 0x89 (smc-pmu / AppleSMCInterface): iterations 9–13.
+      BFS (64-slot stack) tripped hardware watchdog — too many nodes.
+      1-level and 2-level /arm-io scans missed; 3-level scan found it:
+      Path: /arm-io/smc/iop-smc-nub/smc-pmu — NO reg[] property.
+      IOP NUB = logical device; communication is via SMC RTKit mailbox only.
+- [x] Mac code research confirmed: "Wyek"/"ESBM" are callPlatformFunction p1/p2 args,
+      not addressable SMC keys. AppleSMCPMU uses its own internal key/command mapping.
+- [x] Identified SMC_RW_KEY=0x20 as next candidate: defined in m1n1 smc.c but never
+      used. Added smc_get_key_info() + smc_rw_key() to src/smc.c + src/smc.h.
+      usb_spmi_init() (iteration 15): dumps iop-smc-nub props, probes key info for
+      ESBM/Wyek, then issues RW_KEY(ESBM ← Wyek), then checks PMU 0xF801.
+- [x] Iteration 15 (SMC_RW_KEY): RW_KEY(ESBM ← Wyek) returned 0x84 — key not found
+      via any SMC message type. ESBM/Wyek are internal AppleSMCPMU dispatch IDs, not
+      RTKit-level keys. See docs/USB_DEBUG.md "Seventh Investigation".
+- [x] Iterations 16–17: SPMI direct writes (ptmu-region 0, pm_setting, RESET command).
+      All ACKed at SPMI command level but register reads still NACK.
+      Iteration 17 (SPMI RESET): "still in standby". SPMI-side approaches exhausted.
+- [x] MH_FILESET parsing bug found and fixed (LC_FILESET_ENTRY = 0x80000035, not 0x41).
+      Disassembled ApplePPMSMCInterface kext from mac17g kernelcache. Key finding:
+      `sendValueToSMCKey` at fileoff 0x032487bc; at power state 0xe0000340 writes
+      "slpw" to SMC key "ESBM". Keys stored as LE u32 in shmem: ESBM=0x4d425345.
+      See docs/USB_DEBUG.md "Eighth Investigation".
+- [x] Iteration 18 (BE ESBM key): smc_write_u32(0x4553424d, 0x736c7077) → ret=132 (0x84).
+      BE encoding wrong; SMC firmware uses LE keys.
+- [x] Iteration 19 (LE ESBM key): smc_write_u32(0x4d425345, 0x77706c73) → ret=0 (accepted).
+      PMU 0xF801 still NACK — checked AFTER smc_shutdown(); rtkit_quiesce() likely
+      re-asserted SLPSMC before the read.
+- [x] Iteration 20 (pre-shutdown check): tested both "slpw" value encodings (0x736c7077
+      and 0x77706c73) with PMU check before smc_shutdown, 500ms delay. Both NACK.
+      rtkit_quiesce timing is not the sole cause. Root cause still unknown.
+- [x] Iteration 21 flashed; two failures:
+      (a) CRASHLOOP — usb_adt_find_phandle() called adt_first_child_offset() on leaf
+          nodes (cnt==0) and adt_next_sibling_offset() on last siblings; both are Rust
+          .unwrap() panics. ADT_FOREACH_CHILD avoids this via outer _child_count guard.
+          Fixed: cnt<=0 early return + i<cnt-1 guard before adt_next_sibling_offset.
+          Function removed after it became unused in iter 22 (phandle already known).
+      (b) ret=137 — smc_shutdown() was skipped; SMC AON survived AP reset and left
+          endpoint 0x20 open. Next boot's smc_init() rejected with 137. Always call
+          smc_shutdown() on all exit paths.
+- [x] Iteration 22 result: ESBM read=0x00000000 (null at boot; SMC not stateful).
+      WRITE_KEY returned 137 after read. "[0x2]" = message sequence id, not opcode.
+- [x] Iteration 23 result: WRITE_KEY("offw") returned 137 even without pre-read.
+      WRITE_KEY (0x11) is consistently rejected since the crashloop incident.
+- [x] Iteration 24 implemented (2026-03-17): smc_get_key_info(ESBM) for key attributes;
+      smc_rw_key(ESBM, "offw") uses opcode 0x20 (different firmware path than 0x11);
+      SPMI EXT_WRITE to BAKU_LPM_CTRL (0x8FDC=0x00) bypasses SMC entirely. Builds clean.
+- [x] Iteration 25 booted 2026-03-17: ESBM 3-step writes (slpw→rest→offw) all accepted,
+      LPM_CTRL 4B write ACKed, SPMI WAKEUP ACKed. PMU still NACK after 2s poll.
+      All bare-metal ESBM/SMC approaches have failed to exit PMU standby.
+- [x] **Option 4 implemented: HV auto-boot XNU for PMU init (2026-03-17)**
+      New approach: boot macOS kernelcache as HV guest at EL1, let IOKit wake the PMU.
+      New files: src/hv_autoboot.c, src/hv_autoboot.h — Mach-O MH_FILESET parser,
+      standalone HV mode with SPMI polling from EL2 timer FIQ, autoboot exception
+      handling (no USB proxy dependency). Payload: m1n1.bin + kernelcache.mac17g.bin.
+      See docs/USB_DEBUG.md "Option 4" section for full design.
+- [x] First HV auto-boot test (2026-03-17): FAILED — 30s timeout, PMU did not exit standby.
+      XNU likely crashed immediately due to: wrong virt_base (used iBoot's instead of
+      Mach-O vmin), missing LC_FILESET_ENTRY parsing (no entry point found), and
+      hv_exc_proxy deadlock (blocks in uartproxy_run without USB).
+- [x] Iteration 26 fixes applied: virt_base=vmin, LC_FILESET_ENTRY→sub-Mach-O entry point
+      parsing, autoboot exception handler (log+skip instead of proxy loop), timeout→60s,
+      extended MMIO mapping, comprehensive diagnostics.
+- [ ] **NEXT: Flash iteration 26 — look for HV autoboot diagnostics:**
+        "HV autoboot: found fileset entry '..kernel..'" — entry point found
+        "HV autoboot: entry point from kernel LC_UNIXTHREAD: 0x..." — correct PC
+        "HV autoboot: guest exc #1 ..." — XNU crash details (EC, ESR, ELR, FAR)
+        "HV autoboot: PMU exited standby!" — SUCCESS
+      If no fileset entry found: check MH_FILESET structure of mac17g kernelcache
+      If XNU exceptions: decode EC to determine cause (MSR trap, data abort, etc.)
+      If timeout with no exceptions: XNU may be running but PMU init path is different
 - [ ] Confirm tethered boot works over USB-C UART on target hardware
 - [x] Set up ARM64 cross-compilation toolchain (clang + lld) — brew llvm + lld installed
 - [ ] Set up Python proxyclient environment for m1n1 scripting

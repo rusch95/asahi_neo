@@ -47,6 +47,50 @@ Usage: `./verify_dtb.sh <device.dtb>`
 
 ### Build & Flash Helpers
 
+**reinstall_m1n1.sh**
+Install m1n1 (with optional XNU kernelcache payload) into the Linux stub volume.
+
+| Mode | Environment | What it does |
+|------|-------------|-------------|
+| `(default)` | macOS or 1TR | Fast update — overwrites existing boot object on Preboot. No bputil/kmutil. |
+| `--create-stub` | **macOS** | Creates a simple Linux APFS partition. One-time. |
+| `--setup` | **macOS 1TR** | Runs `kmutil configure-boot --raw` + `bless`. Requires `csrutil disable` and `bputil -nkcas` to have been run first. |
+
+First-time install workflow:
+```
+# 1. From macOS — create the Linux partition
+sudo sh reinstall_m1n1.sh --create-stub
+
+# 2. Reboot to macOS 1TR (hold power → Options → Terminal)
+csrutil disable
+bputil -nkcas
+#   (select Linux when prompted, enter macOS credentials)
+
+# 3. Install m1n1 (still in 1TR)
+diskutil apfs unlockVolume disk4s5
+sh /Volumes/Data/Users/rusch/Projects/asahi_neo/scripts/reinstall_m1n1.sh --setup
+
+# 4. Hold power → select macOS to restore normal boot
+# 5. Subsequent m1n1 updates from macOS (no 1TR needed):
+sudo sh reinstall_m1n1.sh
+```
+
+Notes on Apple Silicon boot security (learned the hard way):
+- `bputil -nkcas` and `kmutil configure-boot --raw` both run from **macOS 1TR**
+  (hold power → Options → Terminal). This is the simplest approach and was
+  confirmed working on A18 Pro / macOS 26.
+- The stub is a simple APFS volume in its own container. No volume group, no
+  recovery OS image, no IPSW-derived files needed for the simple approach.
+- `bless --mount /Volumes/Linux --setBoot` makes the stub appear in the boot picker.
+- If the LocalPolicy gets corrupted (e.g. from deleting boot objects), the fix is
+  to delete the stub entirely and recreate from scratch. Attempting to repair a
+  broken LocalPolicy leads to "code pairing (17)" errors that cannot be resolved
+  without a full recreate.
+- The Asahi installer's approach (volume groups, paired recovery, step2.sh) is more
+  complex and designed for M1/M2. On A18 Pro / macOS 26, the recovery pairing
+  mechanism doesn't work correctly with the standard Asahi tooling — the machine
+  always enters the macOS recovery instead of the stub's paired recovery.
+
 **build_kernelcache.sh**
 Builds the custom XNU+shim kernelcache and signs it for Permissive Security.
 (Stub — implementation after shim is written)

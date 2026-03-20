@@ -58,5 +58,30 @@
     "base": 1099511627776,
     "size": 8589934592,
     "hw_memsize": 8589934592
+  },
+  "usb": {
+    "spmi_bus": "nub-spmi-a0@F8908000",
+    "hpm_nodes": ["hpm0@C", "hpm1@A"],
+    "atc_phy0": {
+      "adt_name": "atc-phy0",
+      "phys": 179306496,
+      "compatible": "atc-phy,t8130",
+      "note": "named atc-phy0 (indexed) — matches m1n1 format string"
+    },
+    "usb_drd": {
+      "adt_name": "usb-drd",
+      "phys": 170852352,
+      "compatible": "usb-drd,t8140",
+      "note": "NOT indexed — m1n1 looks for usb-drd0, FAILS. ROOT CAUSE."
+    },
+    "dart_usb": {
+      "adt_name": "dart-usb",
+      "phys": 184418304,
+      "compatible": "dart,t8110",
+      "mapper_child": "mapper-usb@1",
+      "note": "NOT indexed — m1n1 looks for dart-usb0/mapper-usb0, FAILS."
+    },
+    "num_ports": 1,
+    "second_port": "hpm1 exists (two physical USB-C ports) but no atc-phy1/usb-drd1/dart-usb1 — second port is TB4/DP-only"
   }
 }

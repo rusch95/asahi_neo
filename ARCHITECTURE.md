@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — XNU Shim Boot Design
 
-Last updated: 2026-03-14
+Last updated: 2026-03-17
 
 ## Overview
 

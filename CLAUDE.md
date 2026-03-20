@@ -27,11 +27,15 @@ writing patches intended for upstreaming — this is exploratory research only.
 3. **Test scripts first.** Prefer small, targeted scripts that can be run from a tethered
    boot or hypervisor context before writing permanent shim code.
 
-4. **No GenAI patches.** Scripts and analysis tools are fine. Kernel/bootloader patches
-   intended for any upstream must be human-authored and reviewed.
+4. **No GenAI patches for upstreaming.** Patches intended for the Asahi Linux upstream
+   (m1n1, linux-asahi, etc.) must be human-authored and reviewed before submission.
+   For local bringup/research work, the agent (Claude Code) is authorized to make
+   code edits directly — including patches to m1n1 and other bootloader code.
 
 5. **Respect the Asahi social contract.** Never alter macOS security settings.
-   All work happens in isolated APFS containers under Permissive Security.
+   The Linux stub is a simple APFS volume in its own container under
+   Permissive Security. Setup uses `bputil -nkcas` + `kmutil` + `bless`
+   from macOS 1TR. See scripts/README.md for the full workflow.
 
 ## Key References
 
